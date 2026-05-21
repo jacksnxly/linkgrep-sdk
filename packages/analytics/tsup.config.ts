@@ -16,5 +16,6 @@ export default defineConfig([
     clean: false,
     target: "es2017",
     outDir: "dist",
+    outExtension: () => ({ js: ".js" }),
   },
 ]);
