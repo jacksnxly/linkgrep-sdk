@@ -4,7 +4,7 @@ import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { Linkgrep } from "linkgrep";
 import { server } from "./msw-server.js";
-import { linkgrepAnalytics } from "../plugin.js";
+import { linkgrepAnalytics, matchesPath } from "../plugin.js";
 
 const BASE = "https://api.linkgrep.app";
 
@@ -110,5 +110,22 @@ describe("linkgrepAnalytics plugin", () => {
 
     await new Promise((r) => setTimeout(r, 100));
     expect(trackSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("matchesPath", () => {
+  it("matches exact paths", () => {
+    expect(matchesPath("/sign-up/email", ["/sign-up/email"])).toBe(true);
+    expect(matchesPath("/sign-up/email/x", ["/sign-up/email"])).toBe(false);
+  });
+
+  it("matches prefix paths ending in slash", () => {
+    expect(matchesPath("/callback/google", ["/callback/"])).toBe(true);
+    expect(matchesPath("/callback/github", ["/callback/"])).toBe(true);
+    expect(matchesPath("/callback", ["/callback/"])).toBe(false);
+  });
+
+  it("does not match unrelated paths", () => {
+    expect(matchesPath("/sign-in/email", ["/sign-up/email", "/callback/"])).toBe(false);
   });
 });

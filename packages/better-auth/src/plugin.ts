@@ -9,11 +9,34 @@ export interface LinkgrepAnalyticsOptions {
   paths?: string[];
 }
 
-const DEFAULT_PATHS = [
+// Each entry is either an exact path or a path PREFIX ending with "/".
+// Prefix entries match parameterized routes like /callback/google.
+//
+// Verified against better-auth@1.6.11:
+//   - Email sign-up:   createAuthEndpoint("/sign-up/email", ...) (exact)
+//   - OAuth callback:  createAuthEndpoint("/callback/:id", ...)   (prefix /callback/)
+//   - Magic-link:      createAuthEndpoint("/sign-in/magic-link", ...) (exact)
+//     (see node_modules/better-auth/dist/api/routes/callback.mjs and
+//      node_modules/better-auth/dist/plugins/magic-link/index.mjs)
+const DEFAULT_PATHS: readonly string[] = [
   "/sign-up/email",
-  "/sign-in/social/callback",
+  "/callback/", // OAuth callback for all providers (e.g. /callback/google)
   "/sign-in/magic-link",
 ];
+
+export function matchesPath(
+  path: string,
+  patterns: readonly string[],
+): boolean {
+  for (const p of patterns) {
+    if (p.endsWith("/")) {
+      if (path.startsWith(p)) return true;
+    } else if (path === p) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function linkgrepAnalytics(
   opts: LinkgrepAnalyticsOptions,
@@ -28,7 +51,7 @@ export function linkgrepAnalytics(
       after: [
         {
           matcher: (ctx) =>
-            typeof ctx.path === "string" && paths.includes(ctx.path),
+            typeof ctx.path === "string" && matchesPath(ctx.path, paths),
           handler: createAuthMiddleware(async (ctx) => {
             const newUser = ctx.context.newSession?.user;
             // Only fire on endpoints that produced a new session (sign-up,
