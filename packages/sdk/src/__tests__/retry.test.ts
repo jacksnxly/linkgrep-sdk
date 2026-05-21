@@ -7,7 +7,14 @@ describe("withRetry", () => {
     let attempts = 0;
     const fn = vi.fn(async () => {
       attempts++;
-      if (attempts < 3) throw new LinkgrepError(429, "rate_limited", "Too many requests");
+      if (attempts < 3)
+        throw new LinkgrepError({
+          status: 429,
+          code: "rate_limited",
+          message: "Too many requests",
+          raw: null,
+          headers: new Headers(),
+        });
       return "ok";
     });
 
@@ -18,7 +25,13 @@ describe("withRetry", () => {
 
   it("does not retry on 401", async () => {
     const fn = vi.fn(async () => {
-      throw new LinkgrepError(401, "unauthorized", "Unauthorized");
+      throw new LinkgrepError({
+        status: 401,
+        code: "unauthorized",
+        message: "Unauthorized",
+        raw: null,
+        headers: new Headers(),
+      });
     });
 
     await expect(withRetry(fn, 3)).rejects.toThrow(LinkgrepError);
@@ -27,7 +40,13 @@ describe("withRetry", () => {
 
   it("throws after exhausting retries", async () => {
     const fn = vi.fn(async () => {
-      throw new LinkgrepError(500, "server_error", "Internal Server Error");
+      throw new LinkgrepError({
+        status: 500,
+        code: "server_error",
+        message: "Internal Server Error",
+        raw: null,
+        headers: new Headers(),
+      });
     });
 
     await expect(withRetry(fn, 3)).rejects.toThrow(LinkgrepError);

@@ -1,4 +1,4 @@
-import { LinkgrepError } from "./errors.js";
+import { LinkgrepError, parseErrorResponse } from "./errors.js";
 import { withRetry } from "./retry.js";
 
 export interface HttpClientOptions {
@@ -40,12 +40,8 @@ export class HttpClient {
       }
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as Record<string, unknown>;
-        throw new LinkgrepError(
-          res.status,
-          typeof data.code === "string" ? data.code : "unknown",
-          typeof data.message === "string" ? data.message : res.statusText,
-        );
+        const body: unknown = await res.json().catch(() => null);
+        throw parseErrorResponse(res, body);
       }
 
       return res.json() as Promise<T>;
