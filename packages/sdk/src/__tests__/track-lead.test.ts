@@ -16,7 +16,7 @@ describe("linkgrep.track.lead", () => {
       ),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.lead({
       clickId: "click_xyz",
       eventName: "Sign Up",
@@ -33,7 +33,7 @@ describe("linkgrep.track.lead", () => {
       ),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.lead({
       eventName: "Sign Up",
       customerExternalId: "user_123",
@@ -51,7 +51,7 @@ describe("linkgrep.track.lead", () => {
       }),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     await linkgrep.track.lead({
       clickId: "click_xyz",
       eventName: "Sign Up",
@@ -80,7 +80,7 @@ describe("linkgrep.track.lead", () => {
       }),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     await linkgrep.track.lead({
       eventName: "Sign Up",
       customerExternalId: "user_123",
@@ -100,7 +100,7 @@ describe("linkgrep.track.lead", () => {
       }),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     await linkgrep.track.lead({
       clickId: "click_xyz",
       eventName: "Sign Up",
@@ -110,16 +110,18 @@ describe("linkgrep.track.lead", () => {
     expect(body.mode).toBe("fire-and-forget");
   });
 
-  it("does not throw on 500 when throwOnError is false", async () => {
+  it("track.lead.safe returns { ok: false } on 500 instead of throwing", async () => {
     server.use(
       http.post(`${BASE}/api/track/lead`, () =>
         new HttpResponse(null, { status: 500 }),
       ),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: false });
-    await expect(
-      linkgrep.track.lead({ eventName: "Sign Up", customerExternalId: "user_123" })
-    ).resolves.toBeDefined();
+    const linkgrep = new Linkgrep({ token: "test_key" });
+    const result = await linkgrep.track.lead.safe({
+      eventName: "Sign Up",
+      customerExternalId: "user_123",
+    });
+    expect(result.ok).toBe(false);
   });
 });

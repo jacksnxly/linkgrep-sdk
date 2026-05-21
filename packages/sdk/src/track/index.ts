@@ -1,10 +1,10 @@
 import type { HttpClient } from "../http/client.js";
-import { createLeadTracker } from "./lead.js";
-import { createSaleTracker } from "./sale.js";
+import { createLeadTracker, type LeadTracker } from "./lead.js";
+import { createSaleTracker, type SaleTracker } from "./sale.js";
 
 export class TrackNamespace {
-  readonly lead: ReturnType<typeof createLeadTracker>;
-  readonly sale: ReturnType<typeof createSaleTracker>;
+  readonly lead: LeadTracker;
+  readonly sale: SaleTracker;
 
   constructor(http: HttpClient) {
     this.lead = createLeadTracker(http);

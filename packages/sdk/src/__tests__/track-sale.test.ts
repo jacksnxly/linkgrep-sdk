@@ -16,7 +16,7 @@ describe("linkgrep.track.sale", () => {
       ),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.sale({
       customerExternalId: "user_123",
       amount: 9700,
@@ -35,7 +35,7 @@ describe("linkgrep.track.sale", () => {
       ),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.sale({
       customerExternalId: "user_123",
       amount: 9700,
@@ -53,7 +53,7 @@ describe("linkgrep.track.sale", () => {
       }),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     await linkgrep.track.sale({
       customerExternalId: "user_123",
       amount: 9700,
@@ -72,7 +72,7 @@ describe("linkgrep.track.sale", () => {
       }),
     );
 
-    const linkgrep = new Linkgrep({ token: "test_key", throwOnError: true });
+    const linkgrep = new Linkgrep({ token: "test_key" });
     await linkgrep.track.sale({
       customerExternalId: "user_123",
       amount: 9700,

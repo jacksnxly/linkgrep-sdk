@@ -11,7 +11,6 @@ const BASE = "https://api.linkgrep.app";
 function createAuth(overrides?: { paths?: string[] }) {
   const linkgrep = new Linkgrep({
     token: "test_key",
-    throwOnError: true,
     baseUrl: BASE,
   });
 

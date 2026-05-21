@@ -155,3 +155,34 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
       return new LinkgrepError(init);
   }
 }
+
+/**
+ * Result<T, E> — discriminated union used by `.safe()` variants.
+ *
+ * Pre-1.0 SDK convention: default methods throw `LinkgrepError`; opt-in `.safe()`
+ * variants return `Result<T, E>` and never throw. Pattern matches Speakeasy
+ * generated SDKs and Effect-TS Result.
+ */
+export type Result<T, E = LinkgrepError> =
+  | { ok: true; data: T }
+  | { ok: false; error: E };
+
+/**
+ * Wrap a throwing async operation into a Result. Used by .safe() variants.
+ * LinkgrepError is preserved on `result.error`; raw network `Error`s (fetch
+ * failures, DNS errors, aborts) are also returned as-is. The error type is
+ * `LinkgrepError | Error` because network errors are NOT LinkgrepError —
+ * they originate before any server response can be parsed.
+ */
+export async function toResult<T>(
+  promise: Promise<T>,
+): Promise<Result<T, LinkgrepError | Error>> {
+  try {
+    return { ok: true, data: await promise };
+  } catch (err) {
+    if (err instanceof Error) {
+      return { ok: false, error: err };
+    }
+    return { ok: false, error: new Error(String(err)) };
+  }
+}

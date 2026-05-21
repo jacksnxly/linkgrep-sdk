@@ -4,9 +4,21 @@ import type {
   TrackLeadResponse,
   TrackLeadWire,
 } from "@linkgrep/types";
+import {
+  toResult,
+  type LinkgrepError,
+  type Result,
+} from "../http/errors.js";
 
-export function createLeadTracker(http: HttpClient) {
-  return function lead(input: TrackLeadInput): Promise<TrackLeadResponse> {
+export interface LeadTracker {
+  (input: TrackLeadInput): Promise<TrackLeadResponse>;
+  safe(
+    input: TrackLeadInput,
+  ): Promise<Result<TrackLeadResponse, LinkgrepError | Error>>;
+}
+
+export function createLeadTracker(http: HttpClient): LeadTracker {
+  function lead(input: TrackLeadInput): Promise<TrackLeadResponse> {
     const {
       clickId,
       eventName,
@@ -37,5 +49,7 @@ export function createLeadTracker(http: HttpClient) {
       metadata,
     };
     return http.post<TrackLeadResponse>("/api/track/lead", wire);
-  };
+  }
+  lead.safe = (input: TrackLeadInput) => toResult(lead(input));
+  return lead as LeadTracker;
 }

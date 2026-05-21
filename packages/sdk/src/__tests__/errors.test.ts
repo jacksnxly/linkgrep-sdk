@@ -16,7 +16,7 @@ const BASE = "https://api.linkgrep.app";
 
 describe("error parsing", () => {
   function makeClient() {
-    return new Linkgrep({ token: "test_key", throwOnError: true, baseUrl: BASE });
+    return new Linkgrep({ token: "test_key", baseUrl: BASE });
   }
 
   it("parses linkgrep nested envelope {error: {code, message, doc_url}}", async () => {

@@ -1,21 +1,18 @@
-import { LinkgrepError, parseErrorResponse } from "./errors.js";
+import { parseErrorResponse } from "./errors.js";
 import { withRetry } from "./retry.js";
 
 export interface HttpClientOptions {
   token: string;
   baseUrl?: string;
-  throwOnError?: boolean;
 }
 
 export class HttpClient {
   private readonly token: string;
   private readonly baseUrl: string;
-  private readonly throwOnError: boolean;
 
   constructor(opts: HttpClientOptions) {
     this.token = opts.token;
     this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.app";
-    this.throwOnError = opts.throwOnError ?? false;
   }
 
   async post<T>(path: string, body: unknown): Promise<T> {
@@ -40,23 +37,13 @@ export class HttpClient {
       }
 
       if (!res.ok) {
-        const body: unknown = await res.json().catch(() => null);
-        throw parseErrorResponse(res, body);
+        const errorBody: unknown = await res.json().catch(() => null);
+        throw parseErrorResponse(res, errorBody);
       }
 
       return res.json() as Promise<T>;
     };
 
-    try {
-      return await withRetry(run);
-    } catch (err) {
-      if (this.throwOnError) throw err;
-      if (err instanceof LinkgrepError) {
-        console.warn(`[linkgrep] ${err.status} ${err.code}: ${err.message}`);
-      } else {
-        console.warn("[linkgrep]", err);
-      }
-      return {} as T;
-    }
+    return withRetry(run);
   }
 }

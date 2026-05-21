@@ -67,15 +67,32 @@ export function linkgrepAnalytics(
             // a thunk would throw a TypeError because `p.catch` is undefined on
             // a function. Server accepts mode "wait" | "fire-and-forget" |
             // "deferred" — NEVER "async".
+            //
+            // We use `track.lead.safe(...)` (Result<T,E> variant) so background
+            // failures are observable via console.warn instead of being
+            // silently swallowed by better-auth's catch-all. The auth flow
+            // never breaks on attribution failure.
             ctx.context.runInBackground(
-              opts.client.track.lead({
-                clickId: clickId ?? undefined,
-                eventName,
-                customerExternalId: newUser.id,
-                customerEmail: newUser.email ?? undefined,
-                customerName: newUser.name ?? undefined,
-                mode: clickId ? "fire-and-forget" : "deferred",
-              }),
+              opts.client.track.lead
+                .safe({
+                  clickId: clickId ?? undefined,
+                  eventName,
+                  customerExternalId: newUser.id,
+                  customerEmail: newUser.email ?? undefined,
+                  customerName: newUser.name ?? undefined,
+                  mode: clickId ? "fire-and-forget" : "deferred",
+                })
+                .then((result) => {
+                  if (!result.ok) {
+                    const msg =
+                      result.error instanceof Error
+                        ? result.error.message
+                        : "unknown";
+                    console.warn(
+                      `[linkgrep] track.lead failed (${msg})`,
+                    );
+                  }
+                }),
             );
           }),
         },
