@@ -7,16 +7,34 @@ import type {
 
 export function createLeadTracker(http: HttpClient) {
   return function lead(input: TrackLeadInput): Promise<TrackLeadResponse> {
+    const {
+      clickId,
+      eventName,
+      customerExternalId,
+      customerEmail,
+      customerName,
+      mode,
+      metadata,
+      ...rest
+    } = input;
+    // Exhaustiveness guard: if a field is added to TrackLeadInput without
+    // updating this translator, the line below fails to compile. Prevents
+    // silent field drops in the anti-corruption layer.
+    const _exhaustive: Record<string, never> = rest;
+    void _exhaustive;
+
     const wire: TrackLeadWire = {
-      clickId: input.clickId,
-      eventName: input.eventName,
+      clickId,
+      eventName,
       customer: {
-        externalId: input.customerExternalId,
-        email: input.customerEmail,
-        name: input.customerName,
+        externalId: customerExternalId,
+        email: customerEmail,
+        name: customerName,
       },
-      mode: input.mode ?? "fire-and-forget",
-      metadata: input.metadata,
+      // Do not change — server rejects "async"; Zod .default() never fires
+      // because the SDK does not .parse() before sending.
+      mode: mode ?? "fire-and-forget",
+      metadata,
     };
     return http.post<TrackLeadResponse>("/api/track/lead", wire);
   };
