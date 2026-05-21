@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Create Release PR or Publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          publish: pnpm release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish CDN artifact
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          # Upload dist/script.js from @linkgrep/analytics to CDN
+          # Replace with your CDN upload command (e.g. aws s3 cp, vercel cli, etc.)
+          echo "TODO: Upload packages/analytics/dist/script.js to https://cdn.linkgrep.app/analytics/v1/script.js"
+        env:
+          CDN_TOKEN: ${{ secrets.CDN_TOKEN }}
