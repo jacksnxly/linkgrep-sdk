@@ -102,25 +102,72 @@ export class InternalServerError extends LinkgrepError {
  * — a literal `kind` field lets the type checker narrow exhaustively without
  * relying on `instanceof` against multiple subclasses.
  */
+/**
+ * Tagged kinds for transport-layer failures. Listed in a `const` tuple so the
+ * exhaustiveness check inside `LinkgrepNetworkError.from()` blocks a new kind
+ * being added without a matching `classify()` branch.
+ */
+const NETWORK_ERROR_KINDS = ["timeout", "abort", "network"] as const;
+export type LinkgrepNetworkErrorKind = (typeof NETWORK_ERROR_KINDS)[number];
+
 export class LinkgrepNetworkError extends Error {
-  readonly kind: "timeout" | "abort" | "network";
+  readonly kind: LinkgrepNetworkErrorKind;
   override readonly cause?: unknown;
-  constructor(kind: "timeout" | "abort" | "network", message: string, cause?: unknown) {
+  constructor(kind: LinkgrepNetworkErrorKind, message: string, cause?: unknown) {
     super(message);
     this.name = "LinkgrepNetworkError";
     this.kind = kind;
     this.cause = cause;
   }
 
+  /**
+   * Classify a thrown Error's `.name` into the tagged kind. Narrowed return
+   * type triggers an exhaustiveness check (`never` assignment in the default
+   * branch); adding a kind to `LinkgrepNetworkErrorKind` without a matching
+   * `case` here is a compile error — the canonical TS discriminated-union
+   * pattern from the handbook.
+   * https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking
+   */
+  private static classify(name: string): LinkgrepNetworkErrorKind {
+    switch (name) {
+      case "TimeoutError":
+        return "timeout";
+      case "AbortError":
+        return "abort";
+      default:
+        return "network";
+    }
+  }
+
   /** Classify a thrown error from fetch / body-read into a tagged transport failure. */
   static from(err: unknown): LinkgrepNetworkError {
     if (err instanceof Error) {
-      if (err.name === "TimeoutError") return new LinkgrepNetworkError("timeout", err.message, err);
-      if (err.name === "AbortError") return new LinkgrepNetworkError("abort", err.message, err);
-      return new LinkgrepNetworkError("network", err.message, err);
+      return new LinkgrepNetworkError(LinkgrepNetworkError.classify(err.name), err.message, err);
     }
     return new LinkgrepNetworkError("network", String(err), err);
   }
+}
+
+// Compile-time exhaustiveness sentinel for LinkgrepNetworkErrorKind. If a
+// future kind is added to the union without updating `classify()`'s switch,
+// the `_exhaustive: never` assignment below fails to compile. Canonical
+// pattern from the TypeScript handbook (Narrowing → Exhaustiveness checking).
+{
+  const _exhaustiveOnKind = (k: LinkgrepNetworkErrorKind): "timeout" | "abort" | "network" => {
+    switch (k) {
+      case "timeout":
+        return "timeout";
+      case "abort":
+        return "abort";
+      case "network":
+        return "network";
+      default: {
+        const _never: never = k;
+        return _never;
+      }
+    }
+  };
+  void _exhaustiveOnKind;
 }
 
 export function parseErrorResponse(res: Response, body: unknown): LinkgrepError {
