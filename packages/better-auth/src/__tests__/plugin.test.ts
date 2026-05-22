@@ -133,11 +133,24 @@ describe("linkgrepAnalytics plugin", () => {
       headers: new Headers({ cookie: "lgr_id=click_new" }),
     });
 
-    // Negative assertion needs a settling delay; vi.waitFor polls for
-    // success, so use a small sleep here. This is the one path where a
-    // sleep is correct: we are proving the ABSENCE of a side effect.
-    await new Promise((r) => setTimeout(r, 100));
-    expect(trackHandlerSpy).not.toHaveBeenCalled();
+    // Fence pattern (keryx issue #4, 2026-05-23): a fixed 100 ms sleep
+    // cannot PROVE absence — only "absence within 100 ms". On a slow CI
+    // runner a regression with > 100 ms dispatch latency would slip past
+    // the gate and vacuously pass. The deterministic fix is to perform a
+    // KNOWN-DISPATCHING action (a fresh sign-up) AFTER the sign-in, then
+    // wait for that fence's dispatch via vi.waitFor. By the time the
+    // fence resolves, any sign-in–side dispatch would also have had time
+    // to fire — so the spy count being exactly 1 (the fence only) is
+    // proof the sign-in did not dispatch.
+    await auth.api.signUpEmail({
+      body: { email: "dave@test.com", password: "password123", name: "Dave" },
+      headers: new Headers(),
+    });
+    await vi.waitFor(() => expect(trackHandlerSpy).toHaveBeenCalledTimes(1));
+    expect(
+      trackHandlerSpy,
+      "sign-in must NOT dispatch track.lead — fence proves the only dispatch came from the post-sign-in sign-up",
+    ).toHaveBeenCalledTimes(1);
   });
 });
 
