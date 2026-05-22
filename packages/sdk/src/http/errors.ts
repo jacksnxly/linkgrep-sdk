@@ -235,13 +235,13 @@ export type Result<T, E = LinkgrepError> =
  * error. Centralized here so every track endpoint shares the same translation;
  * if the marker shape evolves, it changes in one place.
  *
- * The return is widened to `T | { duplicate: true }` instead of cast back to
- * `T`. Previously `{ duplicate: true } as T` would silently produce an
- * incomplete object if a future response type added required fields — the
- * unsafe cast hid the violation. The discriminated union forces callers to
- * narrow via `result.duplicate` before reading other fields.
+ * Returns a true discriminated union `T | { duplicate: true }`. Track endpoint
+ * response types must NOT include a `duplicate?: boolean` field — that would
+ * defeat the discrimination and TS would let consumers read other fields on a
+ * duplicate result as silently `undefined`. See track/lead.ts:TrackLeadResult
+ * and types.ts comments for the contract.
  */
-export function mapConflict<T extends { duplicate?: boolean }>(
+export function mapConflict<T>(
   p: Promise<T>,
 ): Promise<T | { duplicate: true }> {
   return p.catch((e: unknown) => {

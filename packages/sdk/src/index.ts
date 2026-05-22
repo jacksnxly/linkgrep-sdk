@@ -15,8 +15,8 @@ export {
   LinkgrepNetworkError,
 } from "./http/errors.js";
 export type { Result } from "./http/errors.js";
-export type { LeadTracker } from "./track/lead.js";
-export type { SaleTracker } from "./track/sale.js";
+export type { LeadTracker, TrackLeadResult } from "./track/lead.js";
+export type { SaleTracker, TrackSaleResult } from "./track/sale.js";
 export type {
   TrackLeadInput,
   TrackLeadResponse,

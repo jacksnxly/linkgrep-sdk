@@ -22,6 +22,7 @@ describe(".safe() variants", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      if ("duplicate" in result.data) throw new Error("expected non-duplicate result");
       expect(result.data.customerId).toBe("cus_abc");
     }
   });
@@ -93,6 +94,7 @@ describe(".safe() variants", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
+      if ("duplicate" in result.data) throw new Error("expected non-duplicate result");
       expect(result.data.commissionId).toBe("cm_abc");
     }
   });
@@ -114,7 +116,7 @@ describe(".safe() variants", () => {
     // 409 dedup is a normal success outcome — the client short-circuits it.
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.data.duplicate).toBe(true);
+      expect("duplicate" in result.data && result.data.duplicate).toBe(true);
     }
   });
 

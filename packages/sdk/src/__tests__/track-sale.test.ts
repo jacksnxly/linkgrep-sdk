@@ -24,6 +24,7 @@ describe("linkgrep.track.sale", () => {
       invoiceId: "inv_stripe_abc",
     });
 
+    if ("duplicate" in result) throw new Error("expected non-duplicate result");
     expect(result.commissionId).toBe("cm_abc");
     expect(result.status).toBe("pending");
   });
@@ -41,7 +42,7 @@ describe("linkgrep.track.sale", () => {
       amount: 9700,
     });
 
-    expect(result.duplicate).toBe(true);
+    expect("duplicate" in result && result.duplicate).toBe(true);
   });
 
   it("includes invoiceId as idempotency body field (server keys dedup on this)", async () => {

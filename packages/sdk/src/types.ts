@@ -35,6 +35,9 @@ export interface TrackLeadWire {
 }
 
 // ---------- Lead response (server may include attribution chain) ----------
+// Duplicate (HTTP 409) outcome is modeled as a separate branch in
+// `TrackLeadResult` (see track/lead.ts) instead of as an optional field on
+// this shape, so the discriminated union narrows cleanly via `"duplicate" in r`.
 export interface TrackLeadResponse {
   customerId?: string;
   clickId?: string;
@@ -42,8 +45,6 @@ export interface TrackLeadResponse {
   programId?: string;
   commissionId?: string;
   commissionAmount?: number;
-  // Synthesized client-side on HTTP 409 — the server returns no body.
-  duplicate?: boolean;
 }
 
 // ---------- Sale input (flat ergonomic shape consumers pass) ----------
@@ -73,10 +74,11 @@ export interface TrackSaleWire {
   metadata?: Record<string, unknown>;
 }
 
+// Duplicate (HTTP 409) outcome is modeled as a separate branch in
+// `TrackSaleResult` (see track/sale.ts) instead of as an optional field on
+// this shape, so the discriminated union narrows cleanly via `"duplicate" in r`.
 export interface TrackSaleResponse {
   commissionId?: string;
   commissionAmount?: number;
   status?: string;
-  // Synthesized client-side on HTTP 409 — the server returns no body.
-  duplicate?: boolean;
 }

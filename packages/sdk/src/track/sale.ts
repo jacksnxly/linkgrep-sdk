@@ -12,15 +12,28 @@ import {
   type Result,
 } from "../http/errors.js";
 
+/**
+ * Track.sale result is a discriminated union: the server's `TrackSaleResponse`
+ * shape for the normal path, or `{ duplicate: true }` synthesized by
+ * mapConflict on HTTP 409. Consumers narrow via the `duplicate` flag:
+ *
+ *   const r = await client.track.sale(input);
+ *   if ("duplicate" in r && r.duplicate) { ... } else { use r.commissionId, ... }
+ *
+ * Pre-D2 the public type was just `TrackSaleResponse`, which silently masked
+ * a duplicate result as a base response with all fields undefined.
+ */
+export type TrackSaleResult = TrackSaleResponse | { duplicate: true };
+
 export interface SaleTracker {
-  (input: TrackSaleInput): Promise<TrackSaleResponse>;
+  (input: TrackSaleInput): Promise<TrackSaleResult>;
   safe(
     input: TrackSaleInput,
-  ): Promise<Result<TrackSaleResponse, LinkgrepError | LinkgrepNetworkError>>;
+  ): Promise<Result<TrackSaleResult, LinkgrepError | LinkgrepNetworkError>>;
 }
 
 export function createSaleTracker(http: HttpClient): SaleTracker {
-  function sale(input: TrackSaleInput): Promise<TrackSaleResponse> {
+  function sale(input: TrackSaleInput): Promise<TrackSaleResult> {
     const {
       clickId,
       customerExternalId,
@@ -49,6 +62,9 @@ export function createSaleTracker(http: HttpClient): SaleTracker {
     };
     return mapConflict(http.post<TrackSaleResponse>("/api/track/sale", wire));
   }
-  sale.safe = (input: TrackSaleInput) => toResult(sale(input));
-  return sale as SaleTracker;
+  // Object.assign mirror of track/lead.ts — type-checks the .safe attachment
+  // instead of relying on an unsafe `as SaleTracker` cast (keryx C2).
+  return Object.assign(sale, {
+    safe: (input: TrackSaleInput) => toResult(sale(input)),
+  });
 }

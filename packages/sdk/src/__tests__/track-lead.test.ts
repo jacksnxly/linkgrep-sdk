@@ -23,6 +23,7 @@ describe("linkgrep.track.lead", () => {
       customerExternalId: "user_123",
     });
 
+    if ("duplicate" in result) throw new Error("expected non-duplicate result");
     expect(result.customerId).toBe("cus_abc123");
   });
 
@@ -39,7 +40,7 @@ describe("linkgrep.track.lead", () => {
       customerExternalId: "user_123",
     });
 
-    expect(result.duplicate).toBe(true);
+    expect("duplicate" in result && result.duplicate).toBe(true);
   });
 
   it("translates flat customer fields into nested customer object on the wire", async () => {

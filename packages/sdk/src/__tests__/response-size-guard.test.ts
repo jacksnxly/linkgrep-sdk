@@ -79,6 +79,7 @@ describe("HttpClient — response-size guard (P4)", () => {
 
     const linkgrep = new Linkgrep({ token: "k", baseUrl: BASE });
     const result = await linkgrep.track.lead({ eventName: "Sign Up", customerExternalId: "u1" });
+    if ("duplicate" in result) throw new Error("expected non-duplicate result");
     expect(result.customerId).toBe("c_ok");
   });
 });
