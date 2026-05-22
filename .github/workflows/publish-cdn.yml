@@ -5,6 +5,24 @@ name: Publish CDN
 # so a CDN-upload failure does not poison the npm-publish workflow status —
 # npm and CDN are two writers to the same logical artifact and we don't want
 # them coupled through one workflow's exit code.
+#
+# Uploads `packages/analytics/dist/script.js` (the 1.1 KB minified IIFE) to
+# Cloudflare R2 under two paths per release:
+#
+#   script/v${MAJOR}/script.js        — major-pinned, short cache (5 min).
+#                                       This is the URL the /lgr proxy
+#                                       fetches; allows in-major hotfixes
+#                                       without a customer-side URL change.
+#                                       Stripe's js.stripe.com/v3/ pattern.
+#
+#   script/v${VERSION}/script.js      — exact-version, immutable cache
+#                                       (1 year). Used by jsDelivr-style
+#                                       version-pinned consumers and as
+#                                       the audit trail for what shipped.
+#
+# Served via cdn.linkgrep.xyz (R2 custom domain — bucket binding configured
+# in the Cloudflare dashboard; DNS CNAME from cdn.linkgrep.xyz to the
+# bucket's public R2 endpoint).
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +32,9 @@ on:
         type: string
 
 concurrency: cdn-publish-${{ inputs.version }}
+
+env:
+  R2_BUCKET: linkgrep-cdn
 
 jobs:
   publish:
@@ -28,30 +49,85 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @linkgrep/analytics build
 
-      - name: Publish CDN artifact
+      - name: Validate inputs and artifact
         run: |
           set -euo pipefail
           VERSION="${{ inputs.version }}"
-          MAJOR="${VERSION%%.*}"
-          ARTIFACT="packages/analytics/dist/script.js"
-
-          test -f "$ARTIFACT" || { echo "::error::Missing $ARTIFACT — build did not produce the CDN bundle."; exit 1; }
-
-          if [ -z "${CDN_TOKEN:-}" ]; then
-            echo "::error::CDN_TOKEN secret is not configured for this workflow."
-            echo "::error::Wire it under repo Settings → Secrets → Actions, then re-run with workflow_dispatch."
+          # Strict semver MAJOR.MINOR.PATCH (no pre-release / build suffix —
+          # CDN serves stable only; pre-releases stay on npm + jsDelivr).
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$VERSION'. Expected strict semver MAJOR.MINOR.PATCH."
             exit 1
           fi
+          ARTIFACT="packages/analytics/dist/script.js"
+          test -f "$ARTIFACT" || {
+            echo "::error::Missing $ARTIFACT — build did not produce the CDN bundle."
+            exit 1
+          }
+          # Hard sanity check on artifact size: the IIFE is currently ~1 KB.
+          # A 100 KB+ artifact would mean tsup config drifted (e.g. accidental
+          # bundling of a dependency). Fail loudly before pushing junk to the CDN.
+          SIZE=$(wc -c < "$ARTIFACT")
+          if [ "$SIZE" -gt 102400 ]; then
+            echo "::error::Artifact too large ($SIZE bytes > 100 KiB). Check tsup config; the script bundle should be < 5 KiB."
+            exit 1
+          fi
+          echo "VERSION=$VERSION"      >> "$GITHUB_ENV"
+          echo "MAJOR=${VERSION%%.*}"  >> "$GITHUB_ENV"
+          echo "ARTIFACT=$ARTIFACT"    >> "$GITHUB_ENV"
+          echo "Artifact size: $SIZE bytes"
 
-          # TODO(release): replace with the real upload command. Templates:
-          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${MAJOR}/script.js" \
-          #     --cache-control "public, max-age=300, s-maxage=300"
-          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${VERSION}/script.js" \
-          #     --cache-control "public, max-age=31536000, immutable"
-          # Or Cloudflare R2:
-          #   npx wrangler r2 object put cdn-linkgrep-app/analytics/v${MAJOR}/script.js --file "$ARTIFACT"
-          echo "::error::CDN upload command not yet implemented (analytics ${VERSION})."
-          echo "::error::Implement the upload step in .github/workflows/publish-cdn.yml before next analytics release."
-          exit 1
+      - name: Verify required secrets
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:$missing"
+            echo "::error::Wire under repo Settings → Secrets → Actions. The API token needs R2:Edit on bucket '${R2_BUCKET}'."
+            exit 1
+          fi
         env:
-          CDN_TOKEN: ${{ secrets.CDN_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Exact-version upload — IMMUTABLE.
+      # Pattern: max-age=31536000 + immutable tells the browser AND
+      # Cloudflare's edge to cache forever; safe because the URL is pinned
+      # to a unique version. Same Cache-Control Google / Stripe / npm use
+      # for versioned static assets.
+      - name: Upload exact-version artifact (immutable)
+        run: |
+          npx wrangler r2 object put \
+            "${R2_BUCKET}/script/v${VERSION}/script.js" \
+            --file "${ARTIFACT}" \
+            --content-type "application/javascript; charset=utf-8" \
+            --cache-control "public, max-age=31536000, immutable" \
+            --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Major-pinned upload — MUTABLE.
+      # Pattern: max-age=300 (5 min) lets the edge serve fast but recovers
+      # within minutes if a hotfix bumps the major-pinned artifact. This
+      # is the URL the example app's /lgr proxy fetches, so it MUST be
+      # mutable to support in-major hotfixes without a customer redeploy.
+      - name: Upload major-pinned artifact (mutable, short cache)
+        run: |
+          npx wrangler r2 object put \
+            "${R2_BUCKET}/script/v${MAJOR}/script.js" \
+            --file "${ARTIFACT}" \
+            --content-type "application/javascript; charset=utf-8" \
+            --cache-control "public, max-age=300, s-maxage=300" \
+            --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Report upload
+        run: |
+          echo "::notice::Uploaded @linkgrep/analytics ${VERSION} to:"
+          echo "::notice::  https://cdn.linkgrep.xyz/script/v${VERSION}/script.js (immutable)"
+          echo "::notice::  https://cdn.linkgrep.xyz/script/v${MAJOR}/script.js (mutable, 5 min cache)"
