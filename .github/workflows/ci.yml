@@ -21,3 +21,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
+
+  # Playwright e2e regression suite for the SvelteKit example app. Covers the
+  # security regressions #C1 (SSRF path-boundary) and #I4 (unauthenticated
+  # checkout) — the tests are useless if CI doesn't actually run them.
+  # Workflow shape from https://playwright.dev/docs/ci-intro.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install Playwright browsers
+        run: pnpm --filter example-sveltekit-better-auth-stripe exec playwright install --with-deps chromium
+      - name: Run Playwright tests
+        run: pnpm --filter example-sveltekit-better-auth-stripe test:e2e
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: examples/sveltekit-better-auth-stripe/playwright-report/
+          retention-days: 30
