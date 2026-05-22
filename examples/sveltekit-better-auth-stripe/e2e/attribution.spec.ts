@@ -17,7 +17,7 @@ test.describe("linkgrep attribution flow", () => {
   // clickId" — exercising the @linkgrep/better-auth plugin's after-hook —
   // cannot be observed end-to-end via Playwright's `page.route` because the
   // outbound POST originates in the SvelteKit *server* process
-  // (better-auth's runInBackground → @linkgrep/sdk → api.linkgrep.app), not
+  // (better-auth's runInBackground → @linkgrep/sdk → api.linkgrep.xyz), not
   // in the browser. `page.route` intercepts browser fetches only. The same
   // behavior is verified deterministically at the unit level with MSW Node
   // in packages/better-auth/src/__tests__/plugin.test.ts (6 tests covering

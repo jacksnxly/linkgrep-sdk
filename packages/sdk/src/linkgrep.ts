@@ -12,7 +12,7 @@ import { TrackNamespace } from "./track/index.js";
 export interface LinkgrepOptions {
   /** Linkgrep API bearer token. */
   token: string;
-  /** Override the API host. Default: https://api.linkgrep.app */
+  /** Override the API host. Default: https://api.linkgrep.xyz */
   baseUrl?: string;
   /** Per-attempt timeout in milliseconds. Default: 10_000. */
   timeoutMs?: number;

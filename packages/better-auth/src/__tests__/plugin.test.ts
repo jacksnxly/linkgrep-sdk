@@ -11,7 +11,7 @@ import {
 import { server } from "./msw-server.js";
 import { linkgrepAnalytics, matchesPath } from "../plugin.js";
 
-const BASE = "https://api.linkgrep.app";
+const BASE = "https://api.linkgrep.xyz";
 
 function createAuth(overrides?: {
   paths?: string[];
@@ -167,7 +167,7 @@ describe("I-10: failure path preserves rich LinkgrepError diagnostic", () => {
             error: {
               code: "internal_error",
               message: "downstream attribution service unavailable",
-              doc_url: "https://linkgrep.app/docs/errors/internal-error",
+              doc_url: "https://docs.linkgrep.xyz/errors/internal-error",
             },
           }),
           {
@@ -192,7 +192,7 @@ describe("I-10: failure path preserves rich LinkgrepError diagnostic", () => {
       expect(err.code).toBe("internal_error");
       expect(err.status).toBe(500);
       expect(err.requestId).toBe("req_abc123");
-      expect(err.docUrl).toBe("https://linkgrep.app/docs/errors/internal-error");
+      expect(err.docUrl).toBe("https://docs.linkgrep.xyz/errors/internal-error");
       expect(err.message).toMatch(/downstream attribution service unavailable/);
     }
   });

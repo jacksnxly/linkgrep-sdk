@@ -3,7 +3,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "./msw-server.js";
 import { Linkgrep } from "../linkgrep.js";
 
-const BASE = "https://api.linkgrep.app";
+const BASE = "https://api.linkgrep.xyz";
 
 describe("linkgrep.track.sale", () => {
   it("posts to /api/track/sale and returns response", async () => {

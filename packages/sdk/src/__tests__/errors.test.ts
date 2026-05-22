@@ -15,7 +15,7 @@ import {
   InternalServerError,
 } from "../index.js";
 
-const BASE = "https://api.linkgrep.app";
+const BASE = "https://api.linkgrep.xyz";
 
 describe("error parsing", () => {
   function makeClient() {
@@ -30,7 +30,7 @@ describe("error parsing", () => {
             error: {
               code: "not_found",
               message: "Click not found",
-              doc_url: "https://linkgrep.xyz/docs/api-reference/errors#not-found",
+              doc_url: "https://docs.linkgrep.xyz/api-reference/errors#not-found",
             },
           },
           { status: 404 },
@@ -53,7 +53,7 @@ describe("error parsing", () => {
       expect(e.status).toBe(404);
       expect(e.code).toBe("not_found");
       expect(e.message).toBe("Click not found");
-      expect(e.docUrl).toBe("https://linkgrep.xyz/docs/api-reference/errors#not-found");
+      expect(e.docUrl).toBe("https://docs.linkgrep.xyz/api-reference/errors#not-found");
     }
   });
 

@@ -7,7 +7,7 @@
       // SSR bundle. `init()` reads `?lg_id=` from window.location and
       // persists the click-ID in a cookie. No fetches are made from the
       // browser — server-side track.lead / track.sale calls are what
-      // hit api.linkgrep.app (or, in production, your /lgr first-party
+      // hit api.linkgrep.xyz (or, in production, your /lgr first-party
       // proxy if configured).
       import("@linkgrep/analytics").then(({ init }) => {
         init();

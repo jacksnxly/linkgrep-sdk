@@ -17,7 +17,7 @@ const FORWARDABLE_HEADERS = new Set([
 /**
  * Pick only the lgr_id pair out of an incoming Cookie header. Keeps attribution
  * working without leaking better-auth session cookies or any other host-site
- * cookies to api.linkgrep.app.
+ * cookies to api.linkgrep.xyz.
  */
 function filterCookieHeader(raw: string | null): string | null {
   if (!raw) return null;
@@ -137,8 +137,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   const path = pathname.slice(PROXY_PREFIX.length);
   const isAsset = path.startsWith("/script");
   const target = isAsset
-    ? `https://cdn.linkgrep.app${path}`
-    : `https://api.linkgrep.app${path}${event.url.search}`;
+    ? `https://cdn.linkgrep.xyz${path}`
+    : `https://api.linkgrep.xyz${path}${event.url.search}`;
 
   const forwarded = new Headers();
   for (const [name, value] of event.request.headers) {

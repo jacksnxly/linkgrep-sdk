@@ -117,7 +117,7 @@ export class HttpClient {
 
   constructor(opts: HttpClientOptions) {
     this.token = opts.token;
-    this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.app";
+    this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.xyz";
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.retry = opts.retry;
     this.callerSignal = opts.signal;

@@ -3,7 +3,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "./msw-server.js";
 import { Linkgrep, NotFoundError, InternalServerError, LinkgrepNetworkError, type Result } from "../index.js";
 
-const BASE = "https://api.linkgrep.app";
+const BASE = "https://api.linkgrep.xyz";
 
 describe(".safe() variants", () => {
   it("track.lead.safe returns { ok: true, data } on success", async () => {
