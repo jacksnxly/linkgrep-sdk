@@ -38,6 +38,35 @@ test.describe("linkgrep attribution flow", () => {
     expect((body.customer as Record<string, unknown>).externalId).toBeTruthy();
   });
 
+  // Regression for keryx #C1: the /lgr proxy must NOT match paths like
+  // `/lgr@evil.example/x` or `/lgr-evil.com/y` — those resolve via WHATWG URL
+  // grammar to attacker-controlled hosts (userinfo / host-suffix abuse).
+  test("does not proxy /lgr-prefix paths that lack a path boundary (#C1)", async ({ request }) => {
+    for (const malicious of [
+      "/lgr@evil.example/x",
+      "/lgr-evil.com/y",
+      "/lgrfoo",
+    ]) {
+      const res = await request.get(malicious, { maxRedirects: 0 });
+      // Default SvelteKit `resolve(event)` for an unknown route returns 404.
+      // BUG behavior: the request gets routed through the proxy and either
+      // succeeds (200/proxy response) or fails open with a 5xx from the
+      // outbound fetch — both are NOT 404.
+      expect(res.status(), `malicious path leaked into proxy: ${malicious}`).toBe(404);
+    }
+  });
+
+  // Regression for keryx #I4: /create-checkout must require an authenticated
+  // session and must NOT accept lgCustomerExternalId from the request body.
+  test("create-checkout refuses unauthenticated requests (#I4)", async ({ request }) => {
+    const res = await request.post("/create-checkout", {
+      data: { priceId: "price_pro_demo", lgCustomerExternalId: "victim-user-id-spoofed" },
+    });
+    // Either 401 (correct: unauthenticated) or 400 with a clear "session
+    // required" message. NOT 200 with a successful checkout URL.
+    expect([401, 403], `unauthenticated checkout returned ${res.status()}`).toContain(res.status());
+  });
+
   test("checkout session includes lgCustomerExternalId in metadata", async ({ page }) => {
     const checkoutRequests: Record<string, unknown>[] = [];
     await page.route("**/create-checkout", async route => {
