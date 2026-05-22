@@ -7,10 +7,9 @@ export interface CookieOptions {
 }
 
 export function getCookieValue(name: string): string | undefined {
-  return document.cookie
-    .split("; ")
-    .find(row => row.startsWith(`${name}=`))
-    ?.split("=")[1];
+  const prefix = `${name}=`;
+  const row = document.cookie.split("; ").find(r => r.startsWith(prefix));
+  return row?.slice(prefix.length);
 }
 
 export function setCookie(name: string, value: string, opts: CookieOptions = {}): void {

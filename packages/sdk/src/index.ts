@@ -20,4 +20,4 @@ export type {
   TrackLeadResponse,
   TrackSaleInput,
   TrackSaleResponse,
-} from "@linkgrep/types";
+} from "./types.js";

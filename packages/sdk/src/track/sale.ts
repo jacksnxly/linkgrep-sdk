@@ -1,6 +1,7 @@
 import type { HttpClient } from "../http/client.js";
-import type { TrackSaleInput, TrackSaleResponse } from "@linkgrep/types";
+import type { TrackSaleInput, TrackSaleResponse } from "../types.js";
 import {
+  mapConflict,
   toResult,
   type LinkgrepError,
   type Result,
@@ -15,7 +16,7 @@ export interface SaleTracker {
 
 export function createSaleTracker(http: HttpClient): SaleTracker {
   function sale(input: TrackSaleInput): Promise<TrackSaleResponse> {
-    return http.post<TrackSaleResponse>("/api/track/sale", input);
+    return mapConflict(http.post<TrackSaleResponse>("/api/track/sale", input));
   }
   sale.safe = (input: TrackSaleInput) => toResult(sale(input));
   return sale as SaleTracker;

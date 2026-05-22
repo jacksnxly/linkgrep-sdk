@@ -1,5 +1,7 @@
 node_modules
 dist
+build
+.svelte-kit
 .turbo
 coverage
 .DS_Store
@@ -7,3 +9,5 @@ coverage
 .env
 .env.local
 .env.*.local
+.osgrep
+.keryx

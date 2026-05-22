@@ -18,7 +18,9 @@
     "test": "vitest run",
     "dev": "tsup --watch"
   },
-  "dependencies": { "@linkgrep/types": "workspace:*" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "msw": "^2.7.0",

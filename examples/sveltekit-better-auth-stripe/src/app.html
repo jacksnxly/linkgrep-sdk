@@ -5,13 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     %sveltekit.head%
   </head>
-  <body>
-    <div id="svelte">%sveltekit.body%</div>
-    <script
-      src="/lgr/script.js"
-      data-publishable-key="%VITE_LINKGREP_PUBLISHABLE_KEY%"
-      data-api-host="/lgr"
-      defer
-    ></script>
+  <body data-sveltekit-preload-data="hover">
+    <div id="svelte" style="display: contents;">%sveltekit.body%</div>
   </body>
 </html>
