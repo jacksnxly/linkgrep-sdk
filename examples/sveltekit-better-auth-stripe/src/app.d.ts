@@ -8,7 +8,7 @@ declare global {
 
   interface Window {
     linkgrep?: {
-      init: (opts?: { apiHost?: string; cookieDomain?: string; cookieName?: string }) => void;
+      init: (opts?: { cookieDomain?: string; cookieName?: string }) => void;
       getClickId: (cookieName?: string) => string | undefined;
     };
   }

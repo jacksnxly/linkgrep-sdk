@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { Linkgrep } from "linkgrep";
+import { Linkgrep, DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
 import { server } from "./msw-server.js";
 import { linkgrepAnalytics, matchesPath } from "../plugin.js";
 
@@ -27,7 +27,7 @@ function createAuth(overrides?: { paths?: string[] }) {
     plugins: [
       linkgrepAnalytics({
         client: linkgrep,
-        cookieName: "lgr_id",
+        cookieName: DEFAULT_CLICK_ID_COOKIE,
         eventName: "Sign Up",
         paths: overrides?.paths ?? ["/sign-up/email"],
       }),

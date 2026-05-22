@@ -1,21 +1,27 @@
 import { setCookie, getCookieValue } from "./cookie.js";
+import { DEFAULT_CLICK_ID_COOKIE, CLICK_ID_PATTERN } from "linkgrep";
 
 export interface LinkgrepBrowserAnalyticsOptions {
-  /** Override the linkgrep API host (e.g. for first-party proxy). Reserved; not used by init() yet. */
-  apiHost?: string;
   /** Cookie Domain attribute for cross-subdomain attribution (e.g. ".example.com"). */
   cookieDomain?: string;
   /** Override the default cookie name. */
   cookieName?: string;
 }
 
-export const DEFAULT_COOKIE_NAME = "lgr_id";
+/**
+ * @deprecated Import `DEFAULT_CLICK_ID_COOKIE` from `linkgrep` instead.
+ * Re-exported here for back-compat with existing consumers; will be removed
+ * in v0.2. The constant has moved to the SDK so it can be the single source
+ * of truth across the browser writer (this package), the server reader
+ * (`@linkgrep/better-auth`), and any first-party proxy that filters cookies.
+ */
+export const DEFAULT_COOKIE_NAME: string = DEFAULT_CLICK_ID_COOKIE;
 const DEFAULT_MAX_AGE = 90 * 24 * 60 * 60; // 90 days
 
-// Linkgrep click IDs are URL-safe. Validate at the entry point so an attacker
-// cannot inject `;` / `=` / control bytes via `?lg_id=` into the cookie write.
-// Limit length to keep attacker-controlled cookie size bounded.
-const CLICK_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
+// CLICK_ID_PATTERN is re-imported from linkgrep so both browser and server
+// validate against the same regex — drift here means cookies written by
+// analytics could be silently rejected by the proxy filter or by future
+// server-side click-ID-shape validation. See packages/sdk/src/protocol.ts.
 
 export function init(opts: LinkgrepBrowserAnalyticsOptions = {}): void {
   if (typeof window === "undefined") return;

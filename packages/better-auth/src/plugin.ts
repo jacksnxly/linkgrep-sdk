@@ -1,7 +1,6 @@
 import { createAuthMiddleware } from "better-auth/api";
 import type { BetterAuthPlugin } from "better-auth";
-import type { Linkgrep } from "linkgrep";
-import { DEFAULT_COOKIE_NAME } from "@linkgrep/analytics";
+import { type Linkgrep, DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
 
 export interface LinkgrepBetterAuthOptions {
   client: Linkgrep;
@@ -42,7 +41,7 @@ export function matchesPath(
 export function linkgrepAnalytics(
   opts: LinkgrepBetterAuthOptions,
 ): BetterAuthPlugin {
-  const cookieName = opts.cookieName ?? DEFAULT_COOKIE_NAME;
+  const cookieName = opts.cookieName ?? DEFAULT_CLICK_ID_COOKIE;
   const eventName = opts.eventName ?? "Sign Up";
   const paths = opts.paths ?? DEFAULT_PATHS;
 

@@ -12,7 +12,6 @@ if (typeof window !== "undefined") {
   // Auto-init on script load. Optional config via data-* on the script tag.
   const scriptEl = document.currentScript as HTMLScriptElement | null;
   const opts: LinkgrepBrowserAnalyticsOptions = {};
-  if (scriptEl?.dataset.apiHost) opts.apiHost = scriptEl.dataset.apiHost;
   if (scriptEl?.dataset.cookieDomain) opts.cookieDomain = scriptEl.dataset.cookieDomain;
   if (scriptEl?.dataset.cookieName) opts.cookieName = scriptEl.dataset.cookieName;
   init(opts);

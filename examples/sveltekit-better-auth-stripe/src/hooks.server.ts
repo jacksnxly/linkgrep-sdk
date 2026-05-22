@@ -1,10 +1,11 @@
 import type { Handle } from "@sveltejs/kit";
+import { DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
 
 // Headers that may be forwarded to linkgrep verbatim. Anything not in this
 // list is dropped to avoid leaking the host site's session cookies, auth
 // tokens, or CSRF tokens to a third party (OWASP API8:2023 — Security
 // Misconfiguration). For the Cookie header specifically we further filter
-// to ONLY the lgr_id pair below.
+// to ONLY the click-id cookie pair below.
 const FORWARDABLE_HEADERS = new Set([
   "accept",
   "accept-encoding",
@@ -12,8 +13,6 @@ const FORWARDABLE_HEADERS = new Set([
   "content-type",
   "user-agent",
 ]);
-
-const LINKGREP_COOKIE_NAME = "lgr_id";
 
 /**
  * Pick only the lgr_id pair out of an incoming Cookie header. Keeps attribution
@@ -24,7 +23,7 @@ function filterCookieHeader(raw: string | null): string | null {
   if (!raw) return null;
   const kept = raw
     .split(/;\s*/)
-    .filter(pair => pair.split("=")[0]?.trim() === LINKGREP_COOKIE_NAME);
+    .filter(pair => pair.split("=")[0]?.trim() === DEFAULT_CLICK_ID_COOKIE);
   return kept.length > 0 ? kept.join("; ") : null;
 }
 

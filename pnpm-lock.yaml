@@ -66,6 +66,9 @@ importers:
       happy-dom:
         specifier: ^17.0.0
         version: 17.6.3
+      linkgrep:
+        specifier: workspace:*
+        version: link:../sdk
       react:
         specifier: ^19.0.0
         version: 19.2.6
@@ -77,10 +80,6 @@ importers:
         version: 3.2.4(@types/node@22.19.19)(happy-dom@17.6.3)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))
 
   packages/better-auth:
-    dependencies:
-      '@linkgrep/analytics':
-        specifier: workspace:*
-        version: link:../analytics
     devDependencies:
       better-auth:
         specifier: ^1.6.0

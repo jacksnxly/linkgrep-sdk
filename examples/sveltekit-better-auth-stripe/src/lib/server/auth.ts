@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { Linkgrep } from "linkgrep";
+import { Linkgrep, DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
 import { env } from "$env/dynamic/private";
 
@@ -47,7 +47,7 @@ function build(): ReturnType<typeof betterAuth> {
     plugins: [
       linkgrepAnalytics({
         client: linkgrep,
-        cookieName: "lgr_id",
+        cookieName: DEFAULT_CLICK_ID_COOKIE,
         eventName: "Sign Up",
       }),
     ],

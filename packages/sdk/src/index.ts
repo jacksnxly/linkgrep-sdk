@@ -29,3 +29,4 @@ export type {
   InvoiceId,
 } from "./types.js";
 export { asClickId, asCustomerExternalId, asCustomerId, asInvoiceId } from "./types.js";
+export { DEFAULT_CLICK_ID_COOKIE, CLICK_ID_PATTERN } from "./protocol.js";
