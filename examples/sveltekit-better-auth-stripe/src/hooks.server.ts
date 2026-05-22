@@ -43,10 +43,58 @@ const PROXY_PREFIX = "/lgr";
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
 // Hard cap on incoming proxy-POST bodies. Linkgrep track payloads are <2 KiB;
-// 64 KiB is generous. Anything above gets a 413 rather than being buffered.
-// Defense-in-depth complement to streaming: even when streaming, a malicious
-// content-length forces us to forward megabytes upstream — reject early.
+// 64 KiB is generous. Anything above gets a 413.
+//
+// Two-layer enforcement:
+//   1. Pre-flight Content-Length check — fast-fail before reading the body
+//      (cheap, but bypassable: a chunked / no-Content-Length client skips it).
+//   2. Streaming byte counter wrapped around event.request.body — fires the
+//      shared AbortController once the running total exceeds the cap. This
+//      catches Transfer-Encoding: chunked uploads (keryx #2 regression).
 const MAX_PROXY_BODY_BYTES = 64 * 1024;
+
+/**
+ * Read an inbound ReadableStream into a Uint8Array, refusing once the running
+ * total exceeds `cap`. Returns `null` for the body if the cap is breached;
+ * the caller surfaces a 413.
+ *
+ * Why buffer rather than stream-through with a cap: when the upstream is
+ * permitted to respond mid-body (HTTP duplex), it may decide to reply (e.g.
+ * 502 / 401 / 4xx) before our streaming counter reaches the cap boundary.
+ * In that race, the response returns to the caller WITHOUT our cap ever
+ * firing — false-security streaming. For a 64 KiB cap that's only meant to
+ * bound a track-payload (<2 KiB in practice), buffering is the correct
+ * shape: cap fires before fetch is called, period.
+ *
+ * Pattern: WHATWG-canonical Reader + byte counter from
+ * https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
+ */
+async function readBodyWithCap(
+  src: ReadableStream<Uint8Array>,
+  cap: number,
+): Promise<{ body: Uint8Array | null; tooLarge: boolean }> {
+  const reader = src.getReader();
+  let total = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.length;
+      if (total > cap) {
+        await reader.cancel();
+        return { body: null, tooLarge: true };
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  if (chunks.length === 0) return { body: null, tooLarge: false };
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) { buf.set(c, offset); offset += c.length; }
+  return { body: buf, tooLarge: false };
+}
 
 export const handle: Handle = async ({ event, resolve }) => {
   const { pathname } = event.url;
@@ -85,32 +133,52 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   }
 
+  // Streaming-cap complement to the Content-Length pre-flight: a client that
+  // omits Content-Length (or uses Transfer-Encoding: chunked) skips the
+  // header check, so we MUST read the body ourselves with a running byte
+  // counter before letting fetch ship it upstream. Buffer-and-cap rather
+  // than stream-through-with-cap — see readBodyWithCap docstring for the
+  // race-condition rationale.
+  let bufferedBody: Uint8Array | null = null;
+  if (isBodyMethod && event.request.body) {
+    const { body: buf, tooLarge } = await readBodyWithCap(event.request.body, MAX_PROXY_BODY_BYTES);
+    if (tooLarge) return new Response("Payload Too Large", { status: 413 });
+    bufferedBody = buf;
+  }
+
+  // Shared AbortController fans two abort sources into one upstream-fetch
+  // signal: (a) browser disconnect via event.request.signal — pre-fix, a
+  // closed client connection left the upstream fetch hanging until the
+  // timeout fired, leaking a server slot for up to UPSTREAM_TIMEOUT_MS;
+  // (b) the upstream timeout. Pattern: addEventListener-based composition
+  // works on all Node 18+; AbortSignal.any() (Node 18.17+/20.3+) is the
+  // syntactic-sugar equivalent we intentionally avoid for engine breadth.
+  const ac = new AbortController();
+  const onClientAbort = () => ac.abort(new Error("client-disconnected"));
+  event.request.signal.addEventListener("abort", onClientAbort, { once: true });
+  const timeoutId = setTimeout(() => ac.abort(new Error("upstream-timeout")), UPSTREAM_TIMEOUT_MS);
+
   try {
     return await fetch(target, {
       method: event.request.method,
       headers: forwarded,
-      // Stream the request body upstream instead of buffering with .text().
-      // Per the WHATWG Fetch spec / MDN Request.duplex, `duplex: "half"` is
-      // required whenever the body is a ReadableStream. Without this option
-      // Node fetch (undici) rejects the request.
-      // https://developer.mozilla.org/en-US/docs/Web/API/Request/duplex
-      body: isBodyMethod ? event.request.body : undefined,
-      // @ts-expect-error — `duplex` is part of the Fetch spec but the
-      // TypeScript lib.dom.d.ts hasn't shipped the field yet (Node fetch /
-      // undici requires it for streamed bodies). Track the upstream issue at
-      // https://github.com/microsoft/TypeScript/issues/53157 — remove the
-      // suppression once TypeScript ships the typing.
-      duplex: "half",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+      body: bufferedBody,
+      signal: ac.signal,
     });
   } catch (err) {
-    // AbortSignal.timeout fires with a TimeoutError DOMException (MDN).
-    // Surface a 504 so the browser gets a visible failure instead of the
-    // request hanging or SvelteKit catching it as a 500.
+    // The AbortController's reason distinguishes timeout vs client-close;
+    // both surface as 504 since the upstream did not complete from the
+    // caller's perspective. Unknown transport failures (DNS / ECONNRESET /
+    // TLS) fall through to 502.
+    if (ac.signal.aborted) {
+      return new Response("Upstream Timeout", { status: 504 });
+    }
     if (err instanceof Error && err.name === "TimeoutError") {
       return new Response("Upstream Timeout", { status: 504 });
     }
-    // Generic transport failure — DNS, ECONNRESET, TLS, etc. Same shape.
     return new Response("Bad Gateway", { status: 502 });
+  } finally {
+    clearTimeout(timeoutId);
+    event.request.signal.removeEventListener("abort", onClientAbort);
   }
 };

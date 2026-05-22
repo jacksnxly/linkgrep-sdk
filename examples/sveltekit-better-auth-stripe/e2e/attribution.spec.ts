@@ -45,6 +45,49 @@ test.describe("linkgrep attribution flow", () => {
     expect(page.url()).toMatch(/\/$/);
   });
 
+  // Regression for keryx Important #2 (validated 2026-05-22): /lgr's 64 KiB
+  // request-body cap MUST hold even when the client uses Transfer-Encoding:
+  // chunked (no Content-Length). Pre-fix, the cap was a Content-Length
+  // pre-flight only and a chunked body bypassed it. Either a 413 response
+  // or a connection-reset (server closed mid-write after deciding to refuse)
+  // is acceptable proof the proxy did NOT forward the oversize body upstream.
+  test("rejects oversize CHUNKED body upload to /lgr (#2)", async () => {
+    const http = await import("node:http");
+    const result: { kind: string; status?: number; code?: string } = await new Promise((resolve) => {
+      const req = http.request({
+        hostname: "localhost",
+        port: 5173,
+        method: "POST",
+        path: "/lgr/api/track/lead",
+        headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+      });
+      let settled = false;
+      const settle = (r: { kind: string; status?: number; code?: string }) => {
+        if (!settled) { settled = true; resolve(r); }
+      };
+      req.on("response", res => {
+        res.on("data", () => { /* drain */ });
+        res.on("end", () => settle({ kind: "response", status: res.statusCode }));
+      });
+      req.on("error", (e: NodeJS.ErrnoException) => settle({ kind: "socket-error", code: e.code }));
+      // Stream 80 KiB in 8 KiB chunks
+      const body = "x".repeat(8 * 1024);
+      let written = 0;
+      const writeNext = () => {
+        if (written >= 80 * 1024) { try { req.end(); } catch { /* socket closed */ } return; }
+        try { req.write(body); } catch { return; }
+        written += 8 * 1024;
+        setImmediate(writeNext);
+      };
+      writeNext();
+    });
+
+    const refused =
+      (result.kind === "response" && result.status === 413) ||
+      (result.kind === "socket-error" && (result.code === "ECONNRESET" || result.code === "EPIPE"));
+    expect(refused, `proxy must refuse oversize chunked body (got ${JSON.stringify(result)})`).toBe(true);
+  });
+
   // Regression for keryx #C1: the /lgr proxy must NOT match paths like
   // `/lgr@evil.example/x` or `/lgr-evil.com/y` — those resolve via WHATWG URL
   // grammar to attacker-controlled hosts (userinfo / host-suffix abuse).
