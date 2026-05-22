@@ -56,17 +56,16 @@ describe("withRetry", () => {
   // Regression for keryx issue #5: withRetry must honor server's Retry-After
   // header from RateLimitError (RFC 9110 §10.2.3). Pre-fix it always used
   // exponential backoff, ignoring the server's explicit wait directive.
+  //
+  // C11 refactor: uses behavioral fake-timer assertions
+  // (advanceTimersByTimeAsync) instead of spying on setTimeout. The original
+  // pattern coupled the test to the specific `setTimeout` primitive; a
+  // refactor to scheduler.wait / setImmediate / Promise.then would have broken
+  // it despite identical observable behavior. Vitest's canonical pattern from
+  // https://vitest.dev/api/vi.html is `useFakeTimers()` + `advanceTimersByTimeAsync()`.
   it("waits at least Retry-After seconds before the next attempt on 429", async () => {
     vi.useFakeTimers();
     try {
-      const sleeps: number[] = [];
-      const originalSetTimeout = globalThis.setTimeout;
-      vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any, ms: any) => {
-        sleeps.push(ms as number);
-        // Resolve immediately so the loop progresses without real wall time.
-        return originalSetTimeout(cb, 0) as ReturnType<typeof setTimeout>;
-      });
-
       let attempts = 0;
       const fn = vi.fn(async () => {
         attempts++;
@@ -84,16 +83,26 @@ describe("withRetry", () => {
       });
 
       const p = withRetry(fn, 3);
-      await vi.runAllTimersAsync();
+
+      // Let the microtask queue settle so the first attempt + throw lands.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // Just before Retry-After: second attempt MUST NOT have fired yet. The
+      // retry-after floor is 7000ms; jitter only ADDS, never subtracts, so 6999
+      // is strictly below the soonest possible second call.
+      await vi.advanceTimersByTimeAsync(6999);
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // Past the worst-case jitter ceiling (7000 + floorJitter ≤ 7700 +
+      // safety): the second call must have fired.
+      await vi.advanceTimersByTimeAsync(1000);
       const result = await p;
 
       expect(result).toBe("ok");
       expect(fn).toHaveBeenCalledTimes(2);
-      // First sleep must be >= 7000 ms (the server's Retry-After).
-      expect(sleeps[0]).toBeGreaterThanOrEqual(7000);
     } finally {
       vi.useRealTimers();
-      vi.restoreAllMocks();
     }
   });
 

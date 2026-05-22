@@ -114,16 +114,13 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
   // the strict `>` check lets the loop proceed, and `floorJitter` (up to 1000ms
   // worst-case) could push the actual sleep to ~61_000ms — breaching the
   // documented cap. The post-jitter sleep MUST be clamped to MAX_RETRY_AFTER_MS.
+  //
+  // C11 refactor: replaced setTimeout-spy with behavioral fake-timer
+  // advancement. Vitest canonical pattern (https://vitest.dev/api/vi.html):
+  // advance time and observe call counts.
   it("clamps post-jitter sleep to MAX_RETRY_AFTER_MS at the cap boundary", async () => {
     vi.useFakeTimers();
     try {
-      const originalSetTimeout = globalThis.setTimeout;
-      const recordedSleeps: number[] = [];
-      vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: () => void, ms: number) => {
-        recordedSleeps.push(ms);
-        return originalSetTimeout(cb, 0) as ReturnType<typeof setTimeout>;
-      }) as typeof globalThis.setTimeout);
-
       // Force the worst-case jitter path: floorJitter approaches 1000ms.
       vi.spyOn(Math, "random").mockReturnValue(0.9999);
 
@@ -144,13 +141,18 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
       });
 
       const p = withRetry(fn, 3);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(0); // let first attempt settle
+      expect(fn).toHaveBeenCalledTimes(1);
+
+      // Advance to exactly the documented cap. If post-jitter sleep weren't
+      // clamped, the second attempt would still be pending at this point
+      // (sleep would have been ~60_999ms with worst-case jitter). With the
+      // clamp, the sleep is exactly 60_000ms and the second attempt fires
+      // within this advancement.
+      await vi.advanceTimersByTimeAsync(60_000);
       await p;
 
-      // Filter for the Retry-After sleep (≥ 5000 to exclude vitest/MSW noise).
-      const retrySleeps = recordedSleeps.filter((ms) => ms >= 5000);
-      expect(retrySleeps).toHaveLength(1);
-      expect(retrySleeps[0], "post-jitter sleep must NOT exceed cap").toBeLessThanOrEqual(60_000);
+      expect(fn).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();
@@ -164,6 +166,13 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
 // Our Retry-After honoring path must apply jitter to the sleep, not synchronize
 // every client on the exact server-suggested instant.
 describe("withRetry — jitter on Retry-After floor (#I3c)", () => {
+  // Pragmatic exception to keryx C11 (canonical fake-timer pattern is
+  // preferred over setTimeout-spy): this test measures the EXACT sleep
+  // duration across multiple runs to prove variance. A purely behavioral
+  // assertion (advance by N ms; assert call count) cannot distinguish
+  // "varying sleep duration" from "deterministic sleep duration ≤ N",
+  // because both produce the same call count after the advancement. The
+  // spy is the minimal pattern that records sleep ms per run.
   it("introduces variance across runs when sleeping the Retry-After floor", async () => {
     vi.useFakeTimers();
     try {
