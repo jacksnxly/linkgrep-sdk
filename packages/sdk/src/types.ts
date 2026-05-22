@@ -1,7 +1,14 @@
 // Public SDK types — inlined from the (deleted) @linkgrep/types workspace package.
-// See: linkgrep/apps/web/app/api/track/schemas.ts for the authoritative server schemas
-// these mirror. Kept as plain TypeScript interfaces; the SDK never .parse()s, so
-// Zod was dropped to shrink installed bytes for consumers.
+// Kept as plain TypeScript interfaces; the SDK never .parse()s, so Zod was
+// dropped to shrink installed bytes for consumers.
+//
+// Authoritative server schemas live in a SEPARATE repository:
+//   https://github.com/linkgrep/linkgrep/blob/main/apps/web/app/api/track/schemas.ts
+//
+// There is no automated drift check today. When the server schemas change,
+// these types must be updated by hand. If you find a field documented on the
+// server but missing here, file an issue — and consider adding a contract
+// test against the server's OpenAPI / schema snapshot.
 
 // ---------- Public SDK input (flat, ergonomic) ----------
 export interface TrackLeadInput {

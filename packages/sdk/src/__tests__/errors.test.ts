@@ -170,9 +170,9 @@ describe("error parsing", () => {
       ),
     );
 
-    // We can't trigger a 409 via the SDK's normal happy-path because HttpClient short-circuits
-    // 409 to { duplicate: true } before throwing. To exercise the parser here, call POST directly:
-    // Easier: confirm via a 400 with extra headers.
+    // The track/* layer translates 409 to { duplicate: true } via mapConflict
+    // (see http/errors.ts), so we exercise the parser with a 400 + headers here
+    // instead.
     server.use(
       http.post(`${BASE}/api/track/lead`, () =>
         HttpResponse.json(
