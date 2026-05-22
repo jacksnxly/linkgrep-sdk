@@ -196,10 +196,18 @@ export type Result<T, E = LinkgrepError> =
  * idempotency contract surfaces conflicts as a no-op marker rather than an
  * error. Centralized here so every track endpoint shares the same translation;
  * if the marker shape evolves, it changes in one place.
+ *
+ * The return is widened to `T | { duplicate: true }` instead of cast back to
+ * `T`. Previously `{ duplicate: true } as T` would silently produce an
+ * incomplete object if a future response type added required fields — the
+ * unsafe cast hid the violation. The discriminated union forces callers to
+ * narrow via `result.duplicate` before reading other fields.
  */
-export async function mapConflict<T extends { duplicate?: boolean }>(p: Promise<T>): Promise<T> {
+export function mapConflict<T extends { duplicate?: boolean }>(
+  p: Promise<T>,
+): Promise<T | { duplicate: true }> {
   return p.catch((e: unknown) => {
-    if (e instanceof ConflictError) return { duplicate: true } as T;
+    if (e instanceof ConflictError) return { duplicate: true } as const;
     throw e;
   });
 }
