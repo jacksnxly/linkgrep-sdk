@@ -77,6 +77,10 @@ importers:
         version: 3.2.4(@types/node@22.19.19)(happy-dom@17.6.3)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))
 
   packages/better-auth:
+    dependencies:
+      '@linkgrep/analytics':
+        specifier: workspace:*
+        version: link:../analytics
     devDependencies:
       better-auth:
         specifier: ^1.6.0
