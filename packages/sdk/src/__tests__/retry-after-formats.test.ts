@@ -59,6 +59,33 @@ describe("parseErrorResponse — Retry-After dual format (#I3a)", () => {
     const err = parseErrorResponse(res, await res.json());
     expect((err as RateLimitError).retryAfter).toBeUndefined();
   });
+
+  // Regression for keryx batch-2 #I2: RFC 9110 §10.2.3 defines
+  //   delay-seconds = 1*DIGIT (non-negative base-10 integer).
+  // Previously `Number(raw)` + Number.isFinite accepted negatives, decimals,
+  // hex, scientific notation, and whitespace-only strings (coerced to 0).
+  // Each of these must now return undefined so the value cannot leak through
+  // the public RateLimitError.retryAfter as a misleading number.
+  it.each([
+    ["-5",   "negative integer"],
+    ["13.5", "decimal"],
+    ["0x10", "hexadecimal literal"],
+    ["1e3",  "scientific notation"],
+    ["   ",  "whitespace-only"],
+    ["+12",  "explicit plus sign"],
+  ])("rejects %s (%s) per RFC 9110 §10.2.3", async (header) => {
+    server.use(
+      http.post(`${BASE}/probe`, () =>
+        HttpResponse.json(
+          { error: { code: "rate_limited", message: "slow", doc_url: "" } },
+          { status: 429, headers: { "retry-after": header } },
+        ),
+      ),
+    );
+    const res = await fetch(`${BASE}/probe`, { method: "POST" });
+    const err = parseErrorResponse(res, await res.json());
+    expect((err as RateLimitError).retryAfter).toBeUndefined();
+  });
 });
 
 // Regression for keryx #I3b: Retry-After larger than the SDK's cap must throw
@@ -79,6 +106,53 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
     // No fake timers needed: the cap path must throw without sleeping.
     await expect(withRetry(fn, 3)).rejects.toBeInstanceOf(RateLimitError);
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  // Regression for keryx batch-2 #I11: at the cap boundary (retryAfter=60s),
+  // the strict `>` check lets the loop proceed, and `floorJitter` (up to 1000ms
+  // worst-case) could push the actual sleep to ~61_000ms — breaching the
+  // documented cap. The post-jitter sleep MUST be clamped to MAX_RETRY_AFTER_MS.
+  it("clamps post-jitter sleep to MAX_RETRY_AFTER_MS at the cap boundary", async () => {
+    vi.useFakeTimers();
+    try {
+      const originalSetTimeout = globalThis.setTimeout;
+      const recordedSleeps: number[] = [];
+      vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: () => void, ms: number) => {
+        recordedSleeps.push(ms);
+        return originalSetTimeout(cb, 0) as ReturnType<typeof setTimeout>;
+      }) as typeof globalThis.setTimeout);
+
+      // Force the worst-case jitter path: floorJitter approaches 1000ms.
+      vi.spyOn(Math, "random").mockReturnValue(0.9999);
+
+      let i = 0;
+      const fn = vi.fn(async () => {
+        i++;
+        if (i === 1) {
+          throw new RateLimitError({
+            status: 429,
+            code: "rate_limited",
+            message: "exactly at cap",
+            raw: null,
+            headers: new Headers(),
+            retryAfter: 60, // exactly the cap
+          });
+        }
+        return "ok";
+      });
+
+      const p = withRetry(fn, 3);
+      await vi.runAllTimersAsync();
+      await p;
+
+      // Filter for the Retry-After sleep (≥ 5000 to exclude vitest/MSW noise).
+      const retrySleeps = recordedSleeps.filter((ms) => ms >= 5000);
+      expect(retrySleeps).toHaveLength(1);
+      expect(retrySleeps[0], "post-jitter sleep must NOT exceed cap").toBeLessThanOrEqual(60_000);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
   });
 });
 

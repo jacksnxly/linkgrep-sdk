@@ -156,13 +156,26 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
 /**
  * Parse a Retry-After header value (delta-seconds OR HTTP-date) into a number
  * of seconds from now. Returns undefined for missing / malformed values.
- * RFC 9110 §10.2.3.
+ *
+ * Per RFC 9110 §10.2.3: `delay-seconds = 1*DIGIT` — non-negative base-10
+ * integer. We anchor the seconds branch on /^\d+$/ instead of Number() to
+ * reject negatives, decimals, hex literals (`0x10`), scientific notation
+ * (`1e3`), and whitespace-only strings (which `Number()` coerces to 0).
+ * https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
  */
 function parseRetryAfter(raw: string | null): number | undefined {
   if (!raw) return undefined;
-  const asSeconds = Number(raw);
-  if (Number.isFinite(asSeconds)) return asSeconds;
-  const asDate = Date.parse(raw);
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isSafeInteger(n)) return n;
+  }
+  // HTTP-date per RFC 9110 §5.6.7 always contains whitespace between parts
+  // (e.g. "Sun, 06 Nov 1994 08:49:37 GMT"). Requiring whitespace here rejects
+  // numeric-looking strings ("-5", "+12") that V8's Date.parse permissively
+  // interprets as years (e.g. Date.parse("-5") → year 2001 epoch ms).
+  if (!/\s/.test(trimmed)) return undefined;
+  const asDate = Date.parse(trimmed);
   if (Number.isFinite(asDate)) return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
   return undefined;
 }

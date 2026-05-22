@@ -48,7 +48,14 @@ export async function withRetry<T>(
         if (err instanceof RateLimitError && err.retryAfter !== undefined) {
           const retryAfterMs = err.retryAfter * 1000;
           const floorJitter = Math.random() * Math.min(1000, retryAfterMs * 0.1);
-          sleepMs = Math.max(retryAfterMs + floorJitter, jitter);
+          // Clamp post-jitter to MAX_RETRY_AFTER_MS so the documented cap
+          // ("won't stall longer than 60s") holds end-to-end. Without this
+          // clamp, retryAfter=60 + worst-case jitter could sleep ~61s,
+          // breaching the invariant the caller relies on.
+          sleepMs = Math.min(
+            Math.max(retryAfterMs + floorJitter, jitter),
+            MAX_RETRY_AFTER_MS,
+          );
         }
         await new Promise(r => setTimeout(r, sleepMs));
       }
