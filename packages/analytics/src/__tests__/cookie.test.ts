@@ -18,6 +18,19 @@ describe("cookie utilities", () => {
     expect(getCookieValue("nonexistent")).toBeUndefined();
   });
 
+  // Regression for keryx issue #3: split("=")[1] drops trailing `=` chars.
+  // Base64 / base64url values commonly end in `=` padding; the SDK must
+  // round-trip them losslessly.
+  it("getCookieValue preserves trailing `=` padding (base64 values)", () => {
+    setCookie("lgr_id", "YWJjZA==", { sameSite: "Lax" });
+    expect(getCookieValue("lgr_id")).toBe("YWJjZA==");
+  });
+
+  it("getCookieValue preserves values containing `=` in the middle", () => {
+    setCookie("lgr_id", "a=b=c", { sameSite: "Lax" });
+    expect(getCookieValue("lgr_id")).toBe("a=b=c");
+  });
+
   it("setCookie with domain attribute includes Domain in string", () => {
     // happy-dom ignores Domain but we can test the string building
     // by spying on document.cookie setter
