@@ -46,9 +46,24 @@ export interface TrackLeadResponse {
   duplicate?: boolean;
 }
 
-// ---------- Sale input (flat; matches server wire shape directly) ----------
-// `paymentProcessor` and `eventName` are NOT accepted by the server — do not add.
+// ---------- Sale input (flat ergonomic shape consumers pass) ----------
+// `paymentProcessor` and `eventName` are NOT accepted by the server — do not
+// add. The compile-time exhaustiveness guard in track/sale.ts catches drift.
 export interface TrackSaleInput {
+  clickId?: string;
+  customerExternalId?: string;
+  amount: number;
+  currency?: string;
+  invoiceId?: string;
+  leadEventName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// ---------- Sale wire shape (matches linkgrep server schema) ----------
+// Currently 1:1 with TrackSaleInput but maintained as a separate type so the
+// destructure-then-translate seam in track/sale.ts is explicit and the wire
+// contract can evolve independently of the public input shape.
+export interface TrackSaleWire {
   clickId?: string;
   customerExternalId?: string;
   amount: number;
