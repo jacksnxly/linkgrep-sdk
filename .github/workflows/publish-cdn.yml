@@ -1,0 +1,57 @@
+name: Publish CDN
+
+# Triggered by release.yml after a successful npm publish that included
+# @linkgrep/analytics, OR manually for backfills. Decoupled from release.yml
+# so a CDN-upload failure does not poison the npm-publish workflow status —
+# npm and CDN are two writers to the same logical artifact and we don't want
+# them coupled through one workflow's exit code.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '@linkgrep/analytics version to upload (e.g. 0.1.0)'
+        required: true
+        type: string
+
+concurrency: cdn-publish-${{ inputs.version }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @linkgrep/analytics build
+
+      - name: Publish CDN artifact
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          MAJOR="${VERSION%%.*}"
+          ARTIFACT="packages/analytics/dist/script.js"
+
+          test -f "$ARTIFACT" || { echo "::error::Missing $ARTIFACT — build did not produce the CDN bundle."; exit 1; }
+
+          if [ -z "${CDN_TOKEN:-}" ]; then
+            echo "::error::CDN_TOKEN secret is not configured for this workflow."
+            echo "::error::Wire it under repo Settings → Secrets → Actions, then re-run with workflow_dispatch."
+            exit 1
+          fi
+
+          # TODO(release): replace with the real upload command. Templates:
+          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${MAJOR}/script.js" \
+          #     --cache-control "public, max-age=300, s-maxage=300"
+          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${VERSION}/script.js" \
+          #     --cache-control "public, max-age=31536000, immutable"
+          # Or Cloudflare R2:
+          #   npx wrangler r2 object put cdn-linkgrep-app/analytics/v${MAJOR}/script.js --file "$ARTIFACT"
+          echo "::error::CDN upload command not yet implemented (analytics ${VERSION})."
+          echo "::error::Implement the upload step in .github/workflows/publish-cdn.yml before next analytics release."
+          exit 1
+        env:
+          CDN_TOKEN: ${{ secrets.CDN_TOKEN }}
