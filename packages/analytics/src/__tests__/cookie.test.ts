@@ -31,6 +31,33 @@ describe("cookie utilities", () => {
     expect(getCookieValue("lgr_id")).toBe("a=b=c");
   });
 
+  // Regression for keryx batch-2 #I16: a third-party script can write
+  // `document.cookie = "a=1;b=2"` (no space after `;`). The previous split
+  // pattern `"; "` would fail to find `lgr_id` in such a header. Use /;\s*/
+  // to tolerate any RFC-6265-legal separator. Mock the cookie getter to
+  // return the non-canonical format directly (browsers normalize on write,
+  // so we can't get this state via the setter).
+  it("getCookieValue tolerates cookies separated by `;` without a following space", () => {
+    let proto: object | null = Object.getPrototypeOf(document);
+    let original: PropertyDescriptor | undefined;
+    while (proto && !original) {
+      original = Object.getOwnPropertyDescriptor(proto, "cookie");
+      if (!original) proto = Object.getPrototypeOf(proto);
+    }
+    if (!original) throw new Error("cookie descriptor not found");
+    Object.defineProperty(document, "cookie", {
+      get() { return "a=1;b=2;lgr_id=nospace"; },
+      set() { /* ignored for this test */ },
+      configurable: true,
+    });
+    try {
+      // Fragile split("; ") would return undefined here; robust /;\s*/ finds it.
+      expect(getCookieValue("lgr_id")).toBe("nospace");
+    } finally {
+      Object.defineProperty(document, "cookie", original);
+    }
+  });
+
   it("setCookie with domain attribute includes Domain in string", () => {
     // happy-dom ignores Domain but we can test the string building
     // by spying on document.cookie setter
