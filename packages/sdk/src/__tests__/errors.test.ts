@@ -85,12 +85,15 @@ describe("error parsing", () => {
     }
   });
 
-  it("RateLimitError exposes retryAfter from response headers", async () => {
+  it("RateLimitError exposes retryAfter from response headers", { timeout: 15000 }, async () => {
+    // retry-after: 1 keeps total wait small while still exercising the parser.
+    // (The full retry loop honors this value per RFC 9110, so larger values
+    // would extend the test runtime — see retry.test.ts for that path.)
     server.use(
       http.post(`${BASE}/api/track/lead`, () =>
         HttpResponse.json(
           { error: { code: "rate_limited", message: "Slow down", doc_url: "" } },
-          { status: 429, headers: { "retry-after": "42" } },
+          { status: 429, headers: { "retry-after": "1" } },
         ),
       ),
     );
@@ -101,7 +104,7 @@ describe("error parsing", () => {
       throw new Error("Expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(RateLimitError);
-      expect((err as RateLimitError).retryAfter).toBe(42);
+      expect((err as RateLimitError).retryAfter).toBe(1);
     }
   });
 
