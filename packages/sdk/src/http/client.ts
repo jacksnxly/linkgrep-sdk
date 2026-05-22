@@ -18,6 +18,65 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // error paths in post() below.
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
 
+/**
+ * Stream-read a Response body into JSON with a hard byte cap. Rejects with
+ * LinkgrepNetworkError before allocating beyond `capBytes`. AbortError /
+ * TimeoutError on the underlying stream propagate verbatim (so retry.ts
+ * treats them as terminal, not retryable).
+ *
+ * Returns `null` for empty bodies (matching the previous res.json().catch(()
+ * => null) error-path behavior). Per WHATWG Streams: ReadableStreamDefault-
+ * Reader.cancel() releases the underlying connection once the cap fires.
+ * https://developer.mozilla.org/en-US/docs/Web/API/ReadableStreamDefaultReader/cancel
+ */
+/** @internal exported for regression tests; not part of the public API surface. */
+export async function readJsonWithByteCap(res: Response, capBytes: number): Promise<unknown> {
+  if (res.body === null) return null;
+  const reader = res.body.getReader();
+  let total = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.length;
+      if (total > capBytes) {
+        await reader.cancel();
+        throw new LinkgrepNetworkError(
+          "network",
+          `response too large: >${capBytes} bytes (cap ${capBytes})`,
+        );
+      }
+      chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof LinkgrepNetworkError) throw e;
+    // AbortSignal.timeout binds to the body stream (per MDN AbortSignal),
+    // so a timer that fires mid-body-read makes read() reject with
+    // TimeoutError — that must propagate so retry.ts can treat it as
+    // terminal, not get reclassified as a retryable 5xx.
+    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
+    // JSON-shaped fetch failure (network reset mid-stream, etc.). Match the
+    // pre-fix behavior of res.json().catch(() => null) on the error path.
+    return null;
+  }
+  if (chunks.length === 0) return null;
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    buf.set(c, offset);
+    offset += c.length;
+  }
+  const text = new TextDecoder().decode(buf);
+  if (text.length === 0) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export class HttpClient {
   private readonly token: string;
   private readonly baseUrl: string;
@@ -59,6 +118,13 @@ export class HttpClient {
       // heap. Applied BEFORE .ok branching so 4xx/5xx envelopes are guarded
       // too. A misbehaving / MITM origin can otherwise force multi-MiB JSON
       // allocation in the SDK consumer's process.
+      //
+      // Two-layer defense:
+      //   1. Fast-fail on declared Content-Length (no body read needed).
+      //   2. Stream-read with a running byte counter so chunked / missing-CL
+      //      responses cannot bypass the cap. WHATWG-canonical pattern using
+      //      getReader() + early cancel(); see
+      //      https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
       const declared = res.headers.get("content-length");
       if (declared !== null) {
         const len = Number.parseInt(declared, 10);
@@ -70,20 +136,13 @@ export class HttpClient {
         }
       }
 
+      const parsed = await readJsonWithByteCap(res, DEFAULT_MAX_RESPONSE_BYTES);
+
       if (!res.ok) {
-        // Narrow the swallow to JSON parse errors. AbortSignal.timeout binds
-        // to the body stream (per MDN AbortSignal), so a timer that fires
-        // mid-body-read makes res.json() reject with TimeoutError — that must
-        // propagate so retry.ts can treat it as terminal, not get reclassified
-        // as a retryable 5xx via parseErrorResponse(res, null).
-        const errorBody: unknown = await res.json().catch((e: unknown) => {
-          if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
-          return null;
-        });
-        throw parseErrorResponse(res, errorBody);
+        throw parseErrorResponse(res, parsed);
       }
 
-      return res.json() as Promise<T>;
+      return parsed as T;
     };
 
     // Wrap transport failures in the sealed LinkgrepNetworkError union so the

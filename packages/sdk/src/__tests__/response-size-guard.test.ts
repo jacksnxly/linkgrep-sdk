@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import http from "node:http";
-import { http as mswHttp, HttpResponse, passthrough } from "msw";
+import { http as mswHttp, HttpResponse } from "msw";
 import { server } from "./msw-server.js";
 import { Linkgrep } from "../linkgrep.js";
 import { LinkgrepNetworkError } from "../http/errors.js";
+import { readJsonWithByteCap } from "../http/client.js";
 
 const BASE = "https://api.example.test";
 
@@ -69,68 +69,102 @@ describe("HttpClient — response-size guard (P4)", () => {
     expect((thrown as LinkgrepNetworkError).kind).toBe("network");
   });
 
-  it("accepts responses under cap when Content-Length is missing (chunked, small body)", async () => {
-    // Sanity check: a real upstream that streams a small JSON body via chunked
-    // transfer-encoding (no Content-Length) must still succeed end-to-end.
-    // Uses a real Node http server so transfer-encoding semantics are honest;
-    // MSW cannot reproduce true chunked transfer.
-    const srv = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.setHeader("content-type", "application/json");
-      res.write("{\"customer");   // multiple writes => Node uses chunked, no CL
-      res.write("Id\":\"c_ok\"}");
-      res.end();
-    });
-    await new Promise<void>(r => srv.listen(0, r));
-    try {
-      const port = (srv.address() as { port: number }).port;
-      server.use(mswHttp.all(`http://127.0.0.1:${port}/*`, () => passthrough()));
-      const linkgrep = new Linkgrep({ token: "k", baseUrl: `http://127.0.0.1:${port}`, retry: { maxAttempts: 1 } });
-      const result = await linkgrep.track.lead({ eventName: "Sign Up", customerExternalId: "u1" });
-      if ("duplicate" in result) throw new Error("expected non-duplicate result");
-      expect(result.customerId).toBe("c_ok");
-    } finally { srv.close(); }
+  it("accepts responses without Content-Length (small body, no cap risk)", async () => {
+    // MSW path: ensures the SDK's end-to-end .post() still works when the
+    // upstream returns a normal small JSON body without Content-Length.
+    // (Streaming semantics for chunked oversize are covered by the helper
+    // tests below since MSW eagerly drains ReadableStream bodies.)
+    server.use(
+      mswHttp.post(`${BASE}/api/track/lead`, () =>
+        HttpResponse.json({ customerId: "c_ok" }, { status: 200 }),
+      ),
+    );
+
+    const linkgrep = new Linkgrep({ token: "k", baseUrl: BASE });
+    const result = await linkgrep.track.lead({ eventName: "Sign Up", customerExternalId: "u1" });
+    if ("duplicate" in result) throw new Error("expected non-duplicate result");
+    expect(result.customerId).toBe("c_ok");
   });
 
-  // Regression for keryx P4b (validated 2026-05-22): the size cap MUST hold
-  // even when the upstream omits Content-Length and uses chunked transfer.
-  // Pre-fix, this test passed (the SDK silently buffered megabytes); the
-  // fix streams the body with a byte counter and rejects once the running
-  // total crosses the cap.
-  it("rejects chunked oversize response when Content-Length is missing", async () => {
+});
+
+// Regression for keryx P4b (validated 2026-05-22): the size cap MUST hold
+// even when the upstream omits Content-Length and uses chunked transfer.
+// Pre-fix, the SDK silently buffered megabytes; the fix streams the body
+// with a byte counter and rejects once the running total crosses the cap.
+//
+// Tested at the helper level rather than through the SDK + MSW because
+// MSW v2's response wrapper eagerly drains ReadableStream bodies before
+// returning, which masks the streaming semantics under test. The helper
+// IS what runs in production; the SDK-level call site just hands a real
+// `Response` (from `fetch`) to it. End-to-end behavior is proven by the
+// keryx validation probe at
+// .keryx/validations/artifacts-2026-05-22T1253Z/issue-1-probe-true-chunked.mjs
+// against a real Node http.createServer.
+describe("readJsonWithByteCap — streaming guard (keryx P4b)", () => {
+  function chunkedResponseStream(payload: string, opts: { contentLength?: number } = {}): Response {
+    const enc = new TextEncoder();
+    const CHUNK = 64 * 1024;
+    let offset = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        if (offset >= payload.length) { controller.close(); return; }
+        controller.enqueue(enc.encode(payload.slice(offset, offset + CHUNK)));
+        offset += CHUNK;
+      },
+    });
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (opts.contentLength !== undefined) headers["content-length"] = String(opts.contentLength);
+    return new Response(stream, { status: 200, headers });
+  }
+
+  it("rejects when streamed body exceeds cap (no Content-Length declared)", async () => {
     const PAYLOAD = 2 * 1024 * 1024;
     const padding = "x".repeat(PAYLOAD - 64);
     const body = JSON.stringify({ customerId: "c_oversize", _padding: padding });
+    const res = chunkedResponseStream(body);
 
-    const srv = http.createServer((_req, res) => {
-      res.statusCode = 200;
-      res.setHeader("content-type", "application/json");
-      // Multiple writes force Node to use Transfer-Encoding: chunked and
-      // NOT auto-add Content-Length (a single res.end(body) would).
-      const CHUNK = 64 * 1024;
-      let i = 0;
-      function next() {
-        if (i >= body.length) { res.end(); return; }
-        res.write(body.slice(i, i + CHUNK));
-        i += CHUNK;
-        setImmediate(next);
-      }
-      next();
-    });
-    await new Promise<void>(r => srv.listen(0, r));
+    let thrown: unknown;
     try {
-      const port = (srv.address() as { port: number }).port;
-      server.use(mswHttp.all(`http://127.0.0.1:${port}/*`, () => passthrough()));
-      const linkgrep = new Linkgrep({ token: "k", baseUrl: `http://127.0.0.1:${port}`, retry: { maxAttempts: 1 } });
-      let thrown: unknown;
-      try {
-        await linkgrep.track.lead({ eventName: "Sign Up", customerExternalId: "u1" });
-      } catch (err) {
-        thrown = err;
-      }
-      expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
-      expect((thrown as LinkgrepNetworkError).kind).toBe("network");
-      expect((thrown as LinkgrepNetworkError).message).toMatch(/response too large/i);
-    } finally { srv.close(); }
+      await readJsonWithByteCap(res, 1024 * 1024);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
+    expect((thrown as LinkgrepNetworkError).kind).toBe("network");
+    expect((thrown as LinkgrepNetworkError).message).toMatch(/response too large/i);
+  });
+
+  it("accepts a streamed body under the cap (no Content-Length declared)", async () => {
+    const body = JSON.stringify({ customerId: "c_ok", note: "small" });
+    const res = chunkedResponseStream(body);
+    const parsed = await readJsonWithByteCap(res, 1024 * 1024);
+    expect(parsed).toEqual({ customerId: "c_ok", note: "small" });
+  });
+
+  it("returns null for empty body", async () => {
+    const stream = new ReadableStream({ start(c) { c.close(); } });
+    const res = new Response(stream, { status: 200 });
+    const parsed = await readJsonWithByteCap(res, 1024 * 1024);
+    expect(parsed).toBeNull();
+  });
+
+  it("propagates AbortError thrown by reader.read()", async () => {
+    const stream = new ReadableStream({
+      pull() {
+        const e = new Error("aborted");
+        e.name = "AbortError";
+        throw e;
+      },
+    });
+    const res = new Response(stream, { status: 200 });
+    let thrown: unknown;
+    try {
+      await readJsonWithByteCap(res, 1024 * 1024);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).name).toBe("AbortError");
   });
 });
