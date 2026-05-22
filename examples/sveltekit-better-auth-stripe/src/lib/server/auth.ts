@@ -2,9 +2,11 @@ import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { Linkgrep } from "linkgrep";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
-import { LINKGREP_API_KEY } from "$env/static/private";
+import { env } from "$env/dynamic/private";
 
-const linkgrep = new Linkgrep({ token: LINKGREP_API_KEY });
+// $env/dynamic/private reads at runtime, so a missing var doesn't fail the
+// build — necessary for CI runs that build the demo without secrets.
+const linkgrep = new Linkgrep({ token: env.LINKGREP_API_KEY ?? "demo-key" });
 
 // Demo uses memoryAdapter so the example is self-contained — no DB file,
 // no migrations. State is lost on restart. Replace with a real adapter
