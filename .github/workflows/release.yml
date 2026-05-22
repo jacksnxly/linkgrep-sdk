@@ -9,6 +9,16 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      # changesets/action creates the "Version Packages" PR
+      contents: write
+      pull-requests: write
+      # OIDC token for npm Trusted Publishing — required at the job level so
+      # GitHub Actions mints a workflow-identity token the npm CLI can
+      # exchange for short-lived publish credentials. Without this, the
+      # npm CLI falls back to legacy token auth and `npm publish` fails.
+      # https://docs.npmjs.com/trusted-publishers
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       # pnpm version comes from package.json `packageManager`. Specifying
@@ -19,9 +29,33 @@ jobs:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      # Trusted Publishing requires npm CLI >= 11.5.1 (per
+      # https://docs.npmjs.com/trusted-publishers — "Trusted publishing
+      # requires npm CLI version 11.5.1 or later and Node version 22.14.0 or
+      # higher"). Node 22.x at the time of writing ships with npm 10.x;
+      # bumping the global CLI here pins the OIDC-capable floor regardless
+      # of which Node patch release the runner happens to pull.
+      - name: Bump npm CLI to >= 11.5.1 (Trusted Publishing requirement)
+        run: |
+          npm install -g npm@latest
+          npm --version
+
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+      # NODE_AUTH_TOKEN is intentionally NOT set — Trusted Publishing
+      # authenticates the publish call via the workflow's OIDC token,
+      # exchanged at registry.npmjs.org for ephemeral publish credentials.
+      # The per-package config lives at npmjs.com → Packages → <pkg> →
+      # Settings → Trusted Publishing; each of `linkgrep`,
+      # `@linkgrep/analytics`, `@linkgrep/better-auth` needs its own entry
+      # pointing at this repo + workflow file.
+      #
+      # As a bonus, the npm CLI auto-generates provenance attestations
+      # whenever the publish uses Trusted Publishing — no `--provenance`
+      # flag and no `publishConfig.provenance` needed in each package.json.
+      # https://docs.npmjs.com/generating-provenance-statements
       - name: Create Release PR or Publish
         id: changesets
         uses: changesets/action@v1
@@ -29,7 +63,6 @@ jobs:
           publish: pnpm release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # When @linkgrep/analytics is in the release set, trigger the separate
       # publish-cdn.yml workflow that handles the CDN upload. This decoupling
