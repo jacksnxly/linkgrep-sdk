@@ -20,6 +20,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # Gate on type drift in tests too — vitest erases types at transpile
+      # time and would have shipped LinkgrepErrorCode mismatches silently.
+      # Per docs.npmjs.com/cli/v11 + vitest.dev/guide/cli.html (typecheck
+      # default: false), tsc --noEmit is the canonical gate.
+      - run: pnpm -r --filter "./packages/*" typecheck
       - run: pnpm test
 
   # Playwright e2e regression suite for the SvelteKit example app. Covers the

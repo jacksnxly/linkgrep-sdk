@@ -42,7 +42,7 @@ describe("withRetry", () => {
     const fn = vi.fn(async () => {
       throw new LinkgrepError({
         status: 500,
-        code: "server_error",
+        code: "internal_error",
         message: "Internal Server Error",
         raw: null,
         headers: new Headers(),
@@ -139,7 +139,7 @@ describe("withRetry", () => {
       attempts++;
       throw new LinkgrepError({
         status: 500,
-        code: "server_error",
+        code: "internal_error",
         message: "Internal Server Error",
         raw: null,
         headers: new Headers(),
@@ -202,7 +202,7 @@ describe("withRetry", () => {
       attempts++;
       throw new LinkgrepError({
         status: 500,
-        code: "server_error",
+        code: "internal_error",
         message: "Internal Server Error",
         raw: null,
         headers: new Headers(),
