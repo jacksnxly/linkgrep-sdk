@@ -94,9 +94,11 @@ describe("withRetry", () => {
       await vi.advanceTimersByTimeAsync(6999);
       expect(fn).toHaveBeenCalledTimes(1);
 
-      // Past the worst-case jitter ceiling (7000 + floorJitter ≤ 7700 +
-      // safety): the second call must have fired.
-      await vi.advanceTimersByTimeAsync(1000);
+      // Past the worst-case jitter ceiling: retry-after + Math.max(2000,
+      // retryAfterMs * 0.5) = 7000 + max(2000, 3500) = 7000 + 3500 = 10500 ms.
+      // Advance to 12000 ms total for safety. The jitter widening (issue #2)
+      // raised this ceiling from ~7700 ms to ~10500 ms.
+      await vi.advanceTimersByTimeAsync(5001);
       const result = await p;
 
       expect(result).toBe("ok");

@@ -218,4 +218,54 @@ describe("withRetry — jitter on Retry-After floor (#I3c)", () => {
       vi.restoreAllMocks();
     }
   });
+
+  // Regression: at Retry-After: 1 (the common rate-limit recovery instant),
+  // the pre-fix jitter window was Math.min(1000, retryAfterMs * 0.1) = 100 ms.
+  // 100 ms is too narrow to de-correlate N concurrent SDK replicas — they
+  // all wake within a 100 ms window and re-fire near-simultaneously. The
+  // mature fix per AWS's Decorrelated Jitter pattern is to widen the floor;
+  // we use Math.max(2000, retryAfterMs * 0.5). Validated 2026-05-23 against
+  // 100 samples per Retry-After value (.keryx/validations/.../issue2-runtime.txt).
+  it("Retry-After: 1 spreads across ≥1.5 s window across 100 samples (#issue-2)", async () => {
+    vi.useFakeTimers();
+    try {
+      const recordedSleeps: number[] = [];
+      for (let n = 0; n < 100; n++) {
+        let i = 0;
+        const fn = vi.fn(async () => {
+          i++;
+          if (i === 1) {
+            throw new RateLimitError({
+              status: 429,
+              code: "rate_limited",
+              message: "slow",
+              raw: null,
+              headers: new Headers(),
+              retryAfter: 1,
+            });
+          }
+          return "ok";
+        });
+        const p = withRetry(fn, {
+          maxAttempts: 2,
+          baseDelayMs: 1,
+          onSleep: (ms) => recordedSleeps.push(ms),
+        });
+        await vi.runAllTimersAsync();
+        await p;
+      }
+      const min = Math.min(...recordedSleeps);
+      const max = Math.max(...recordedSleeps);
+      const spread = max - min;
+      expect(min, "every sleep must respect the 1000 ms server-supplied floor").toBeGreaterThanOrEqual(1000);
+      // Pre-fix bound: spread ≤ 100 ms (Math.min(1000, retryAfterMs*0.1) = 100).
+      // Post-fix bound: spread ~Math.max(2000, retryAfterMs*0.5) = 2000 ms.
+      // Assert ≥ 1500 ms with safety margin; the floor is 2000 so the spread
+      // across 100 samples is overwhelmingly likely to exceed 1500 ms.
+      expect(spread, "jitter spread must exceed 1.5 s to break recovery-instant synchronization").toBeGreaterThan(1500);
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
 });

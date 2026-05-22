@@ -128,13 +128,22 @@ export async function withRetry<T>(
         const base = Math.min(Math.pow(2, attempt) * baseDelayMs, maxBackoffMs);
         const jitter = base * (0.8 + Math.random() * 0.4);
 
-        // When honoring Retry-After, add small additive jitter so concurrent
-        // clients don't synchronize on the exact recovery instant. AWS calls
-        // this the "thundering herd" prevention pattern.
+        // When honoring Retry-After, add additive jitter so concurrent clients
+        // don't synchronize on the exact recovery instant. AWS calls this the
+        // "thundering herd" prevention pattern; per the AWS Architecture Blog
+        // (https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/),
+        // the "Decorrelated Jitter" formula `random(base, sleep * 3)` is the
+        // recommended shape. Server-supplied Retry-After is a minimum we
+        // MUST respect (RFC 9110 §10.2.3), so the jitter is ADDED ON TOP —
+        // not replacing the floor — and the spread is scaled by Retry-After
+        // with a 2-second floor for small Retry-After values (where 10%
+        // proportional jitter would only give ~100 ms spread, too narrow at
+        // N replicas to break recovery-instant synchronization).
         let sleepMs = jitter;
         if (err instanceof RateLimitError && err.retryAfter !== undefined) {
           const retryAfterMs = err.retryAfter * 1000;
-          const floorJitter = Math.random() * Math.min(1000, retryAfterMs * 0.1);
+          const jitterRange = Math.max(2000, retryAfterMs * 0.5);
+          const floorJitter = Math.random() * jitterRange;
           // Clamp post-jitter to maxRetryAfterMs so the documented cap holds
           // end-to-end. Without this clamp, retryAfter at exactly the cap +
           // worst-case jitter could sleep ~1s past the cap.
