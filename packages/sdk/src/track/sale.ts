@@ -8,6 +8,7 @@ import {
   mapConflict,
   toResult,
   type LinkgrepError,
+  type LinkgrepNetworkError,
   type Result,
 } from "../http/errors.js";
 
@@ -15,7 +16,7 @@ export interface SaleTracker {
   (input: TrackSaleInput): Promise<TrackSaleResponse>;
   safe(
     input: TrackSaleInput,
-  ): Promise<Result<TrackSaleResponse, LinkgrepError | Error>>;
+  ): Promise<Result<TrackSaleResponse, LinkgrepError | LinkgrepNetworkError>>;
 }
 
 export function createSaleTracker(http: HttpClient): SaleTracker {

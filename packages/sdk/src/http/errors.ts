@@ -85,6 +85,44 @@ export class InternalServerError extends LinkgrepError {
   }
 }
 
+/**
+ * Transport-layer failure surfaced to `.safe()` callers as part of a sealed
+ * discriminated union. The `kind` field is the tag — consumers narrow with
+ *
+ *   if (!result.ok) {
+ *     switch (result.error.kind) {
+ *       case "timeout":  // request budget exhausted
+ *       case "abort":    // caller-initiated cancellation
+ *       case "network":  // DNS, connection reset, TLS, etc.
+ *     }
+ *   }
+ *
+ * Following the canonical TypeScript pattern documented at
+ * https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions
+ * — a literal `kind` field lets the type checker narrow exhaustively without
+ * relying on `instanceof` against multiple subclasses.
+ */
+export class LinkgrepNetworkError extends Error {
+  readonly kind: "timeout" | "abort" | "network";
+  override readonly cause?: unknown;
+  constructor(kind: "timeout" | "abort" | "network", message: string, cause?: unknown) {
+    super(message);
+    this.name = "LinkgrepNetworkError";
+    this.kind = kind;
+    this.cause = cause;
+  }
+
+  /** Classify a thrown error from fetch / body-read into a tagged transport failure. */
+  static from(err: unknown): LinkgrepNetworkError {
+    if (err instanceof Error) {
+      if (err.name === "TimeoutError") return new LinkgrepNetworkError("timeout", err.message, err);
+      if (err.name === "AbortError") return new LinkgrepNetworkError("abort", err.message, err);
+      return new LinkgrepNetworkError("network", err.message, err);
+    }
+    return new LinkgrepNetworkError("network", String(err), err);
+  }
+}
+
 export function parseErrorResponse(res: Response, body: unknown): LinkgrepError {
   const ct = res.headers.get("content-type") ?? "";
   let code = "unknown";
@@ -214,20 +252,20 @@ export function mapConflict<T extends { duplicate?: boolean }>(
 
 /**
  * Wrap a throwing async operation into a Result. Used by .safe() variants.
- * LinkgrepError is preserved on `result.error`; raw network `Error`s (fetch
- * failures, DNS errors, aborts) are also returned as-is. The error type is
- * `LinkgrepError | Error` because network errors are NOT LinkgrepError —
- * they originate before any server response can be parsed.
+ * The error branch is a sealed discriminated union: either a `LinkgrepError`
+ * (server returned a response with a recognized error envelope) or a
+ * `LinkgrepNetworkError` (transport failure — DNS, abort, timeout). Consumers
+ * narrow exhaustively via `instanceof LinkgrepError` or `error.kind`.
  */
 export async function toResult<T>(
   promise: Promise<T>,
-): Promise<Result<T, LinkgrepError | Error>> {
+): Promise<Result<T, LinkgrepError | LinkgrepNetworkError>> {
   try {
     return { ok: true, data: await promise };
   } catch (err) {
-    if (err instanceof Error) {
+    if (err instanceof LinkgrepError) {
       return { ok: false, error: err };
     }
-    return { ok: false, error: new Error(String(err)) };
+    return { ok: false, error: LinkgrepNetworkError.from(err) };
   }
 }

@@ -8,6 +8,7 @@ import {
   mapConflict,
   toResult,
   type LinkgrepError,
+  type LinkgrepNetworkError,
   type Result,
 } from "../http/errors.js";
 
@@ -15,7 +16,7 @@ export interface LeadTracker {
   (input: TrackLeadInput): Promise<TrackLeadResponse>;
   safe(
     input: TrackLeadInput,
-  ): Promise<Result<TrackLeadResponse, LinkgrepError | Error>>;
+  ): Promise<Result<TrackLeadResponse, LinkgrepError | LinkgrepNetworkError>>;
 }
 
 export function createLeadTracker(http: HttpClient): LeadTracker {

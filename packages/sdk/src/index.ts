@@ -12,6 +12,7 @@ export {
   UnprocessableEntityError,
   RateLimitError,
   InternalServerError,
+  LinkgrepNetworkError,
 } from "./http/errors.js";
 export type { Result } from "./http/errors.js";
 export type { LeadTracker } from "./track/lead.js";
