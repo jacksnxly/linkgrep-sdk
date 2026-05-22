@@ -36,6 +36,12 @@ function createAuth(overrides?: { paths?: string[] }) {
 }
 
 describe("linkgrepAnalytics plugin", () => {
+  // #I13 — Previously `await new Promise(r => setTimeout(r, 100))` was used
+  // to wait for better-auth's `runInBackground` flush. On a slow CI runner
+  // 100ms can be insufficient (GC pause, cold start) → flake. Replace with
+  // `vi.waitFor(...)` which polls the assertion until it passes or times out
+  // — the canonical pattern per vitest docs (vitest.dev/api/vi.html).
+
   it("calls track.lead with nested customer object after email sign-up", async () => {
     let capturedBody: Record<string, unknown> = {};
 
@@ -52,9 +58,9 @@ describe("linkgrepAnalytics plugin", () => {
       headers: new Headers({ cookie: "lgr_id=click_abc123" }),
     });
 
-    await new Promise((r) => setTimeout(r, 100));
-
-    expect(capturedBody.eventName).toBe("Sign Up");
+    await vi.waitFor(() => {
+      expect(capturedBody.eventName).toBe("Sign Up");
+    });
     expect(capturedBody.customer).toMatchObject({
       externalId: expect.any(String),
       email: "jane@test.com",
@@ -80,9 +86,9 @@ describe("linkgrepAnalytics plugin", () => {
       headers: new Headers(),
     });
 
-    await new Promise((r) => setTimeout(r, 100));
-
-    expect(capturedBody.mode).toBe("deferred");
+    await vi.waitFor(() => {
+      expect(capturedBody.mode).toBe("deferred");
+    });
     expect(capturedBody.clickId).toBeUndefined();
   });
 
@@ -100,6 +106,10 @@ describe("linkgrepAnalytics plugin", () => {
       body: { email: "carol@test.com", password: "password123", name: "Carol" },
       headers: new Headers(),
     });
+    // Wait for the sign-up's runInBackground track.lead to finish BEFORE
+    // mockClear, otherwise an in-flight sign-up call could be miscounted
+    // against the sign-in assertion below.
+    await vi.waitFor(() => expect(trackSpy).toHaveBeenCalled());
     trackSpy.mockClear();
 
     await auth.api.signInEmail({
@@ -107,6 +117,9 @@ describe("linkgrepAnalytics plugin", () => {
       headers: new Headers({ cookie: "lgr_id=click_new" }),
     });
 
+    // Negative assertion needs a settling delay; vi.waitFor polls for
+    // success, so use a small sleep here. This is the one path where a
+    // sleep is correct: we are proving the ABSENCE of a side effect.
     await new Promise((r) => setTimeout(r, 100));
     expect(trackSpy).not.toHaveBeenCalled();
   });

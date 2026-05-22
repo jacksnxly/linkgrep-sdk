@@ -31,41 +31,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Publish @linkgrep/analytics's IIFE bundle to cdn.linkgrep.app whenever
-      # the package is included in the release set. Fails LOUDLY if the upload
-      # is not configured — silent skip is worse than a broken release because
-      # browser users would silently get stale code.
-      #
-      # changesets/action exposes `publishedPackages` as a JSON array of
-      # {name, version}; we gate on `@linkgrep/analytics` appearing in it.
-      # Ref: https://github.com/changesets/action#outputs
-      - name: Publish CDN artifact
+      # When @linkgrep/analytics is in the release set, trigger the separate
+      # publish-cdn.yml workflow that handles the CDN upload. This decoupling
+      # is intentional: a CDN-upload failure must NOT poison the npm publish
+      # workflow status (which would train maintainers to ignore the red X).
+      # The dispatched workflow has its own loud-fail behavior, isolated.
+      - name: Dispatch CDN publish workflow
         if: |
           steps.changesets.outputs.published == 'true' &&
           contains(fromJSON(steps.changesets.outputs.publishedPackages).*.name, '@linkgrep/analytics')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANALYTICS_VERSION: ${{ toJSON(steps.changesets.outputs.publishedPackages) }}
         run: |
           set -euo pipefail
-
-          VERSION=$(jq -r '.[] | select(.name == "@linkgrep/analytics") | .version' \
-            <<< '${{ steps.changesets.outputs.publishedPackages }}')
-          MAJOR="${VERSION%%.*}"
-          ARTIFACT="packages/analytics/dist/script.js"
-
-          test -f "$ARTIFACT" || { echo "::error::Missing $ARTIFACT — build did not produce the CDN bundle."; exit 1; }
-
-          if [ -z "${CDN_TOKEN:-}" ]; then
-            echo "::error::@linkgrep/analytics ${VERSION} was published to npm but CDN_TOKEN is not configured."
-            echo "::error::Wire the secret AND replace this step body with the real upload command before next release."
-            exit 1
-          fi
-
-          # TODO(release): wire the real CDN upload. Examples:
-          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${MAJOR}/script.js" \
-          #     --cache-control "public, max-age=300, s-maxage=300"
-          #   aws s3 cp "$ARTIFACT" "s3://cdn-linkgrep-app/analytics/v${VERSION}/script.js" \
-          #     --cache-control "public, max-age=31536000, immutable"
-          # Or (Cloudflare R2): npx wrangler r2 object put cdn-linkgrep-app/analytics/v${MAJOR}/script.js --file "$ARTIFACT"
-          echo "::error::CDN_TOKEN present but upload command not implemented (analytics ${VERSION}); refusing to ship a half-release."
-          exit 1
-        env:
-          CDN_TOKEN: ${{ secrets.CDN_TOKEN }}
+          VERSION=$(jq -r '.[] | select(.name == "@linkgrep/analytics") | .version' <<< "$ANALYTICS_VERSION")
+          gh workflow run publish-cdn.yml \
+            --ref "${GITHUB_REF_NAME}" \
+            -f version="$VERSION"

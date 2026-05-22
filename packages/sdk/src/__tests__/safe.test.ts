@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "./msw-server.js";
-import { Linkgrep, NotFoundError, type Result } from "../index.js";
+import { Linkgrep, NotFoundError, LinkgrepNetworkError, type Result } from "../index.js";
 
 const BASE = "https://api.linkgrep.app";
 
@@ -51,7 +51,7 @@ describe(".safe() variants", () => {
     }
   });
 
-  it("track.lead.safe wraps network errors as { ok: false, error } (does NOT throw)", async () => {
+  it("track.lead.safe wraps network errors as LinkgrepNetworkError (does NOT throw)", async () => {
     server.use(
       http.post(`${BASE}/api/track/lead`, () => {
         return HttpResponse.error(); // simulates network error
@@ -67,8 +67,14 @@ describe(".safe() variants", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      // Network errors are NOT LinkgrepError; they are raw Error.
-      expect(result.error).toBeInstanceOf(Error);
+      // Network failures are now surfaced as a tagged LinkgrepNetworkError
+      // so consumers can discriminate timeout / abort / network via .kind
+      // (#I10 — previously the type was `LinkgrepError | Error` and the only
+      // way to narrow was string-sniff err.name).
+      expect(result.error).toBeInstanceOf(LinkgrepNetworkError);
+      if (result.error instanceof LinkgrepNetworkError) {
+        expect(result.error.kind).toBe("network");
+      }
     }
   });
 
@@ -128,6 +134,24 @@ describe("default throwing behavior (throwOnError option removed)", () => {
     await expect(
       linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+// Regression for keryx batch-2 #I10: LinkgrepNetworkError.from() must
+// classify the underlying transport failure into the right tagged kind so
+// consumers can branch on `error.kind`.
+describe("LinkgrepNetworkError discriminator", () => {
+  it("classifies AbortError → kind: 'abort'", () => {
+    const err = LinkgrepNetworkError.from(new DOMException("user cancelled", "AbortError"));
+    expect(err.kind).toBe("abort");
+  });
+  it("classifies TimeoutError → kind: 'timeout'", () => {
+    const err = LinkgrepNetworkError.from(new DOMException("timed out", "TimeoutError"));
+    expect(err.kind).toBe("timeout");
+  });
+  it("classifies anything else → kind: 'network'", () => {
+    const err = LinkgrepNetworkError.from(new TypeError("fetch failed"));
+    expect(err.kind).toBe("network");
   });
 });
 

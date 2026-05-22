@@ -8,7 +8,13 @@ export interface CookieOptions {
 
 export function getCookieValue(name: string): string | undefined {
   const prefix = `${name}=`;
-  const row = document.cookie.split("; ").find(r => r.startsWith(prefix));
+  // RFC 6265 §4.2.1 specifies `";" SP` between Cookie-header pairs and modern
+  // browsers normalize `document.cookie` to that format. However, a
+  // third-party script writing `document.cookie = "a=1;b=2"` (no space) can
+  // produce non-canonical input the browser may surface back verbatim. Use
+  // /;\s*/ to robustly handle either case — same pattern as the server-side
+  // filterCookieHeader in examples/sveltekit-better-auth-stripe/src/hooks.server.ts.
+  const row = document.cookie.split(/;\s*/).find(r => r.startsWith(prefix));
   return row?.slice(prefix.length);
 }
 

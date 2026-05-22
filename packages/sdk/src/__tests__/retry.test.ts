@@ -113,4 +113,57 @@ describe("withRetry", () => {
     await expect(withRetry(fn, 3)).rejects.toBe(err);
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  // Regression for keryx batch-2 #I15: callers must be able to tune retry
+  // behavior via a RetryOptions object. Previously maxAttempts was the only
+  // knob, hard-coded as the second arg. The new surface exposes maxAttempts,
+  // baseDelayMs, and maxRetryAfterMs with safe defaults.
+  //
+  // This test uses maxAttempts:1 so the loop exits without ever reaching the
+  // sleep path — avoiding cross-test fake-timer / setTimeout-spy leakage seen
+  // when this test ran alongside the existing Retry-After fake-timer tests.
+  it("accepts a RetryOptions object (single-attempt skips the sleep path)", async () => {
+    let attempts = 0;
+    async function fn() {
+      attempts++;
+      throw new LinkgrepError({
+        status: 500,
+        code: "server_error",
+        message: "Internal Server Error",
+        raw: null,
+        headers: new Headers(),
+      });
+    }
+    let caught: unknown;
+    try {
+      await withRetry(fn, { maxAttempts: 1 });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LinkgrepError);
+    expect(attempts).toBe(1);
+  });
+
+  // Verifies the back-compat path: passing a bare number still works.
+  it("back-compat: accepts a bare maxAttempts number", async () => {
+    let attempts = 0;
+    async function fn() {
+      attempts++;
+      throw new LinkgrepError({
+        status: 500,
+        code: "server_error",
+        message: "Internal Server Error",
+        raw: null,
+        headers: new Headers(),
+      });
+    }
+    let caught: unknown;
+    try {
+      await withRetry(fn, 1);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LinkgrepError);
+    expect(attempts).toBe(1);
+  });
 });

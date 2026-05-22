@@ -85,6 +85,44 @@ export class InternalServerError extends LinkgrepError {
   }
 }
 
+/**
+ * Transport-layer failure surfaced to `.safe()` callers as part of a sealed
+ * discriminated union. The `kind` field is the tag — consumers narrow with
+ *
+ *   if (!result.ok) {
+ *     switch (result.error.kind) {
+ *       case "timeout":  // request budget exhausted
+ *       case "abort":    // caller-initiated cancellation
+ *       case "network":  // DNS, connection reset, TLS, etc.
+ *     }
+ *   }
+ *
+ * Following the canonical TypeScript pattern documented at
+ * https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions
+ * — a literal `kind` field lets the type checker narrow exhaustively without
+ * relying on `instanceof` against multiple subclasses.
+ */
+export class LinkgrepNetworkError extends Error {
+  readonly kind: "timeout" | "abort" | "network";
+  override readonly cause?: unknown;
+  constructor(kind: "timeout" | "abort" | "network", message: string, cause?: unknown) {
+    super(message);
+    this.name = "LinkgrepNetworkError";
+    this.kind = kind;
+    this.cause = cause;
+  }
+
+  /** Classify a thrown error from fetch / body-read into a tagged transport failure. */
+  static from(err: unknown): LinkgrepNetworkError {
+    if (err instanceof Error) {
+      if (err.name === "TimeoutError") return new LinkgrepNetworkError("timeout", err.message, err);
+      if (err.name === "AbortError") return new LinkgrepNetworkError("abort", err.message, err);
+      return new LinkgrepNetworkError("network", err.message, err);
+    }
+    return new LinkgrepNetworkError("network", String(err), err);
+  }
+}
+
 export function parseErrorResponse(res: Response, body: unknown): LinkgrepError {
   const ct = res.headers.get("content-type") ?? "";
   let code = "unknown";
@@ -156,13 +194,26 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
 /**
  * Parse a Retry-After header value (delta-seconds OR HTTP-date) into a number
  * of seconds from now. Returns undefined for missing / malformed values.
- * RFC 9110 §10.2.3.
+ *
+ * Per RFC 9110 §10.2.3: `delay-seconds = 1*DIGIT` — non-negative base-10
+ * integer. We anchor the seconds branch on /^\d+$/ instead of Number() to
+ * reject negatives, decimals, hex literals (`0x10`), scientific notation
+ * (`1e3`), and whitespace-only strings (which `Number()` coerces to 0).
+ * https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
  */
 function parseRetryAfter(raw: string | null): number | undefined {
   if (!raw) return undefined;
-  const asSeconds = Number(raw);
-  if (Number.isFinite(asSeconds)) return asSeconds;
-  const asDate = Date.parse(raw);
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const n = Number(trimmed);
+    if (Number.isSafeInteger(n)) return n;
+  }
+  // HTTP-date per RFC 9110 §5.6.7 always contains whitespace between parts
+  // (e.g. "Sun, 06 Nov 1994 08:49:37 GMT"). Requiring whitespace here rejects
+  // numeric-looking strings ("-5", "+12") that V8's Date.parse permissively
+  // interprets as years (e.g. Date.parse("-5") → year 2001 epoch ms).
+  if (!/\s/.test(trimmed)) return undefined;
+  const asDate = Date.parse(trimmed);
   if (Number.isFinite(asDate)) return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
   return undefined;
 }
@@ -183,30 +234,38 @@ export type Result<T, E = LinkgrepError> =
  * idempotency contract surfaces conflicts as a no-op marker rather than an
  * error. Centralized here so every track endpoint shares the same translation;
  * if the marker shape evolves, it changes in one place.
+ *
+ * The return is widened to `T | { duplicate: true }` instead of cast back to
+ * `T`. Previously `{ duplicate: true } as T` would silently produce an
+ * incomplete object if a future response type added required fields — the
+ * unsafe cast hid the violation. The discriminated union forces callers to
+ * narrow via `result.duplicate` before reading other fields.
  */
-export async function mapConflict<T extends { duplicate?: boolean }>(p: Promise<T>): Promise<T> {
+export function mapConflict<T extends { duplicate?: boolean }>(
+  p: Promise<T>,
+): Promise<T | { duplicate: true }> {
   return p.catch((e: unknown) => {
-    if (e instanceof ConflictError) return { duplicate: true } as T;
+    if (e instanceof ConflictError) return { duplicate: true } as const;
     throw e;
   });
 }
 
 /**
  * Wrap a throwing async operation into a Result. Used by .safe() variants.
- * LinkgrepError is preserved on `result.error`; raw network `Error`s (fetch
- * failures, DNS errors, aborts) are also returned as-is. The error type is
- * `LinkgrepError | Error` because network errors are NOT LinkgrepError —
- * they originate before any server response can be parsed.
+ * The error branch is a sealed discriminated union: either a `LinkgrepError`
+ * (server returned a response with a recognized error envelope) or a
+ * `LinkgrepNetworkError` (transport failure — DNS, abort, timeout). Consumers
+ * narrow exhaustively via `instanceof LinkgrepError` or `error.kind`.
  */
 export async function toResult<T>(
   promise: Promise<T>,
-): Promise<Result<T, LinkgrepError | Error>> {
+): Promise<Result<T, LinkgrepError | LinkgrepNetworkError>> {
   try {
     return { ok: true, data: await promise };
   } catch (err) {
-    if (err instanceof Error) {
+    if (err instanceof LinkgrepError) {
       return { ok: false, error: err };
     }
-    return { ok: false, error: new Error(String(err)) };
+    return { ok: false, error: LinkgrepNetworkError.from(err) };
   }
 }

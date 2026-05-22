@@ -1,11 +1,13 @@
 import { parseErrorResponse } from "./errors.js";
-import { withRetry } from "./retry.js";
+import { withRetry, type RetryOptions } from "./retry.js";
 
 export interface HttpClientOptions {
   token: string;
   baseUrl?: string;
-  /** Per-request timeout in milliseconds. Default 10s. */
+  /** Per-attempt timeout in milliseconds. Each retry attempt restarts the timer. Default 10s. */
   timeoutMs?: number;
+  /** Retry policy. See RetryOptions for tunable knobs. Default: 3 attempts, 1s base, 60s cap. */
+  retry?: RetryOptions;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -14,11 +16,13 @@ export class HttpClient {
   private readonly token: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly retry: RetryOptions | undefined;
 
   constructor(opts: HttpClientOptions) {
     this.token = opts.token;
     this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.app";
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.retry = opts.retry;
   }
 
   /**
@@ -61,7 +65,7 @@ export class HttpClient {
       return res.json() as Promise<T>;
     };
 
-    return withRetry(run);
+    return withRetry(run, this.retry);
   }
 }
 

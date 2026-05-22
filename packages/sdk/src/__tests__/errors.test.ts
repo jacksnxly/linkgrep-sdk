@@ -163,16 +163,9 @@ describe("error parsing", () => {
   });
 
   it("exposes raw body and headers on every error", async () => {
-    const rawBody = { error: { code: "conflict", message: "Already tracked", doc_url: "https://x" } };
-    server.use(
-      http.post(`${BASE}/api/track/sale`, () =>
-        HttpResponse.json(rawBody, { status: 409, headers: { "x-request-id": "req_abc123" } }),
-      ),
-    );
-
     // The track/* layer translates 409 to { duplicate: true } via mapConflict
-    // (see http/errors.ts), so we exercise the parser with a 400 + headers here
-    // instead.
+    // (see http/errors.ts), so we exercise the parser with a 400 + headers
+    // on the lead endpoint — the only endpoint this test actually invokes.
     server.use(
       http.post(`${BASE}/api/track/lead`, () =>
         HttpResponse.json(
