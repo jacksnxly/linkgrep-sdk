@@ -67,13 +67,16 @@ test.describe("linkgrep attribution flow", () => {
     expect([401, 403], `unauthenticated checkout returned ${res.status()}`).toContain(res.status());
   });
 
-  test("checkout session includes lgCustomerExternalId in metadata", async ({ page }) => {
+  test("pricing page POSTs to /create-checkout WITHOUT lgCustomerExternalId in the body", async ({ page }) => {
+    // After #I4, the client does NOT send lgCustomerExternalId — the server
+    // derives it from the authenticated session. The pricing page just sends
+    // { priceId }. Stripe metadata is populated server-side.
     const checkoutRequests: Record<string, unknown>[] = [];
     await page.route("**/create-checkout", async route => {
       checkoutRequests.push(route.request().postDataJSON());
       await route.fulfill({
         status: 200,
-        body: JSON.stringify({ url: "https://checkout.stripe.com/test" }),
+        body: JSON.stringify({ url: "https://checkout.stripe.com/test", lgCustomerExternalId: "u_server_derived" }),
       });
     });
 
@@ -85,6 +88,7 @@ test.describe("linkgrep attribution flow", () => {
 
     expect(checkoutRequests.length).toBeGreaterThan(0);
     const body = checkoutRequests[0];
-    expect(body).toHaveProperty("lgCustomerExternalId");
+    expect(body).toHaveProperty("priceId");
+    expect(body, "client must NOT supply lgCustomerExternalId (server-derived)").not.toHaveProperty("lgCustomerExternalId");
   });
 });

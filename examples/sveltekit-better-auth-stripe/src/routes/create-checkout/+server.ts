@@ -1,18 +1,25 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
+import { auth } from "$lib/server/auth";
 
-// Minimal checkout endpoint. Reads { priceId, lgCustomerExternalId } and
-// (in a real app) calls stripe.checkout.sessions.create with that metadata.
-// The e2e test mocks this endpoint, so we only need to mirror the contract.
+// Server-side checkout endpoint. The lgCustomerExternalId MUST come from the
+// authenticated session, never from the request body — accepting it from the
+// client lets an attacker attribute conversions to any user (commission /
+// attribution spoofing). better-auth canonical session lookup:
+// https://www.better-auth.com/docs/integrations/svelte-kit
 export const POST: RequestHandler = async ({ request }) => {
-  const body = (await request.json()) as {
-    priceId?: string;
-    lgCustomerExternalId?: string;
-  };
-  if (!body.priceId || !body.lgCustomerExternalId) {
-    return json({ error: "priceId and lgCustomerExternalId required" }, { status: 400 });
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session?.user) {
+    return json({ error: "unauthorized" }, { status: 401 });
   }
+
+  const body = (await request.json()) as { priceId?: string };
+  if (!body.priceId) {
+    return json({ error: "priceId required" }, { status: 400 });
+  }
+
+  const lgCustomerExternalId = session.user.id;
   // Real implementation:
-  //   const session = await createCheckoutSession(body.lgCustomerExternalId, body.priceId);
-  //   return json({ url: session.url });
-  return json({ url: "/success" });
+  //   const stripeSession = await createCheckoutSession(lgCustomerExternalId, body.priceId);
+  //   return json({ url: stripeSession.url });
+  return json({ url: "/success", lgCustomerExternalId });
 };
