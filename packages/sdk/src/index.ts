@@ -22,4 +22,9 @@ export type {
   TrackLeadResponse,
   TrackSaleInput,
   TrackSaleResponse,
+  ClickId,
+  CustomerExternalId,
+  CustomerId,
+  InvoiceId,
 } from "./types.js";
+export { asClickId, asCustomerExternalId, asCustomerId, asInvoiceId } from "./types.js";
