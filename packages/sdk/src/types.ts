@@ -1,0 +1,60 @@
+// Public SDK types — inlined from the (deleted) @linkgrep/types workspace package.
+// See: linkgrep/apps/web/app/api/track/schemas.ts for the authoritative server schemas
+// these mirror. Kept as plain TypeScript interfaces; the SDK never .parse()s, so
+// Zod was dropped to shrink installed bytes for consumers.
+
+// ---------- Public SDK input (flat, ergonomic) ----------
+export interface TrackLeadInput {
+  clickId?: string;
+  eventName: string;
+  customerExternalId: string;
+  customerName?: string;
+  customerEmail?: string;
+  mode?: "wait" | "fire-and-forget" | "deferred";
+  metadata?: Record<string, unknown>;
+}
+
+// ---------- HTTP wire shape (matches linkgrep server schema) ----------
+export interface TrackLeadWire {
+  clickId?: string;
+  eventName: string;
+  customer: {
+    externalId?: string;
+    email?: string;
+    name?: string;
+  };
+  mode: "wait" | "fire-and-forget" | "deferred";
+  metadata?: Record<string, unknown>;
+}
+
+// ---------- Lead response (server may include attribution chain) ----------
+export interface TrackLeadResponse {
+  customerId?: string;
+  clickId?: string;
+  partnerId?: string;
+  programId?: string;
+  commissionId?: string;
+  commissionAmount?: number;
+  // Synthesized client-side on HTTP 409 — the server returns no body.
+  duplicate?: boolean;
+}
+
+// ---------- Sale input (flat; matches server wire shape directly) ----------
+// `paymentProcessor` and `eventName` are NOT accepted by the server — do not add.
+export interface TrackSaleInput {
+  clickId?: string;
+  customerExternalId?: string;
+  amount: number;
+  currency?: string;
+  invoiceId?: string;
+  leadEventName?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TrackSaleResponse {
+  commissionId?: string;
+  commissionAmount?: number;
+  status?: string;
+  // Synthesized client-side on HTTP 409 — the server returns no body.
+  duplicate?: boolean;
+}

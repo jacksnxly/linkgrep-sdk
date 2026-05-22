@@ -74,10 +74,6 @@ importers:
         version: 3.2.4(@types/node@22.19.19)(happy-dom@17.6.3)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))
 
   packages/better-auth:
-    dependencies:
-      '@linkgrep/types':
-        specifier: workspace:*
-        version: link:../types
     devDependencies:
       better-auth:
         specifier: ^1.6.0
@@ -99,10 +95,6 @@ importers:
         version: 3.2.4(@types/node@22.19.19)(happy-dom@17.6.3)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))
 
   packages/sdk:
-    dependencies:
-      '@linkgrep/types':
-        specifier: workspace:*
-        version: link:../types
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -116,12 +108,6 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@22.19.19)(happy-dom@17.6.3)(msw@2.14.6(@types/node@22.19.19)(typescript@5.9.3))
-
-  packages/types:
-    dependencies:
-      zod:
-        specifier: ^3.25.0
-        version: 3.25.76
 
 packages:
 
@@ -2224,9 +2210,6 @@ packages:
   zimmerframe@1.1.4:
     resolution: {integrity: sha512-B58NGBEoc8Y9MWWCQGl/gq9xBCe4IiKM0a2x7GZdQKOW5Exr8S1W24J6OgM1njK8xCRGvAJIL/MxXHf6SkmQKQ==}
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
@@ -4168,7 +4151,5 @@ snapshots:
       yargs-parser: 21.1.1
 
   zimmerframe@1.1.4: {}
-
-  zod@3.25.76: {}
 
   zod@4.4.3: {}

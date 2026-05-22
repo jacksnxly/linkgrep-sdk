@@ -1,5 +1,5 @@
 import type { HttpClient } from "../http/client.js";
-import type { TrackSaleInput, TrackSaleResponse } from "@linkgrep/types";
+import type { TrackSaleInput, TrackSaleResponse } from "../types.js";
 import {
   toResult,
   type LinkgrepError,

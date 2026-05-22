@@ -3,7 +3,7 @@ import type {
   TrackLeadInput,
   TrackLeadResponse,
   TrackLeadWire,
-} from "@linkgrep/types";
+} from "../types.js";
 import {
   toResult,
   type LinkgrepError,
