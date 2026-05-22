@@ -1,8 +1,7 @@
 import { type RequestHandler } from "@sveltejs/kit";
 import type Stripe from "stripe";
 import { constructWebhookEvent } from "$lib/server/stripe";
-import { Linkgrep, LinkgrepError } from "linkgrep";
-import { env } from "$env/dynamic/private";
+import { getLinkgrep, logTrackError } from "$lib/server/linkgrep";
 
 // Stripe webhook endpoint — closes the linkgrep attribution loop by calling
 // `track.sale` when a Stripe checkout completes. This demonstrates the second
@@ -16,19 +15,11 @@ import { env } from "$env/dynamic/private";
 // `request.text()` returns the raw body BEFORE any JSON parse — necessary
 // because Stripe's signature is computed over the raw bytes; mutating the
 // body (whitespace, key order) breaks verification.
-
-// Lazy Linkgrep client mirroring `auth.ts` — refuses to boot the SDK without
-// the API key in production, but allows demo builds to ship without secrets.
-let _client: Linkgrep | undefined;
-function getLinkgrep(): Linkgrep {
-  if (_client) return _client;
-  const token = env.LINKGREP_API_KEY;
-  if (process.env.NODE_ENV === "production" && !token) {
-    throw new Error("LINKGREP_API_KEY is required in production");
-  }
-  _client = new Linkgrep({ token: token ?? "demo-key" });
-  return _client;
-}
+//
+// Linkgrep client + structured error logging are consumed from the shared
+// composition root at $lib/server/linkgrep — the same client `auth.ts`
+// uses for lead-tracking — so token/baseUrl/retry/fetch config can never
+// drift between the lead and sale halves of attribution.
 
 export const POST: RequestHandler = async ({ request }) => {
   const signature = request.headers.get("stripe-signature");
@@ -91,24 +82,13 @@ export const POST: RequestHandler = async ({ request }) => {
           currency: session.currency ?? undefined,
         })
         .then((r) => {
-          if (!r.ok) {
-            if (r.error instanceof LinkgrepError) {
-              console.warn(
-                `[linkgrep] track.sale failed: code=${r.error.code} status=${r.error.status} requestId=${r.error.requestId ?? "-"} message=${r.error.message}`,
-              );
-            } else {
-              console.warn(
-                `[linkgrep] track.sale transport failure: kind=${r.error.kind} message=${r.error.message}`,
-              );
-            }
-          }
+          if (!r.ok) logTrackError("track.sale", r.error);
         })
         .catch((e) => {
           // Defensive — .safe() is documented to never throw, but guard
           // against unhandled-rejection-crashes-the-process if that
           // contract is ever broken.
-          const message = e instanceof Error ? e.message : String(e);
-          console.warn(`[linkgrep] track.sale unexpected error: ${message}`);
+          logTrackError("track.sale", e);
         });
     }
   }

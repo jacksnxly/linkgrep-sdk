@@ -1,30 +1,23 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { Linkgrep } from "linkgrep";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
-import { env } from "$env/dynamic/private";
+import { getLinkgrep } from "$lib/server/linkgrep";
 
-// Twelve-Factor "Config" — store config in the environment, refuse to boot
-// when production secrets are missing rather than degrading to a literal
-// committed in source. https://12factor.net/config
+// Twelve-Factor "Config" — secrets live in the environment, never in
+// source. The linkgrep client is built once via the shared composition
+// root in $lib/server/linkgrep so config (token, baseUrl, retry, fetch)
+// never drifts between this module and the stripe-webhook route.
 //
-// IMPORTANT: SvelteKit's `vite build` runs the prerender `analyse` step under
-// NODE_ENV=production, which imports this module. If we threw at module
-// import time, every CI build without secrets would fail (which is wrong —
-// the build artifact is fine, only the running server needs the secrets).
-// So the gate fires LAZILY on first request: build stays green, but the
-// running server refuses to handle traffic without real secrets.
+// The AUTH_SECRET gate fires lazily on first request rather than at
+// module-load time because SvelteKit's `vite build` runs the prerender
+// `analyse` step under NODE_ENV=production, which imports this module.
+// Throwing at import time would fail every CI build without secrets —
+// the build artifact is fine, only the running server needs them.
 const IS_PROD = process.env.NODE_ENV === "production";
 
 let _instance: ReturnType<typeof betterAuth> | undefined;
 
 function build(): ReturnType<typeof betterAuth> {
-  const linkgrepApiKey = env.LINKGREP_API_KEY;
-  if (IS_PROD && !linkgrepApiKey) {
-    throw new Error("LINKGREP_API_KEY is required in production");
-  }
-  const linkgrep = new Linkgrep({ token: linkgrepApiKey ?? "demo-key" });
-
   const authSecret = process.env.AUTH_SECRET;
   if (IS_PROD && !authSecret) {
     throw new Error("AUTH_SECRET is required in production");
@@ -46,7 +39,7 @@ function build(): ReturnType<typeof betterAuth> {
     emailAndPassword: { enabled: true },
     plugins: [
       linkgrepAnalytics({
-        client: linkgrep,
+        client: getLinkgrep(),
         // `cookieName` intentionally omitted — the plugin defaults to
         // `DEFAULT_CLICK_ID_COOKIE` from the SDK's `protocol.ts`. Passing
         // it explicitly here would teach the unnecessary import and
