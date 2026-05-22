@@ -1,4 +1,4 @@
-import { LinkgrepError, RateLimitError, isTerminalTransportError } from "./errors.js";
+import { LinkgrepError, LinkgrepNetworkError, RateLimitError, isTerminalTransportError } from "./errors.js";
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -65,7 +65,16 @@ const DEFAULT_RETRY: Required<Omit<RetryOptions, "totalBudgetMs" | "onSleep">> =
 export async function withRetry<T>(
   fn: (perAttemptSignal?: AbortSignal) => Promise<T>,
   options: RetryOptions | number = DEFAULT_RETRY,
+  callerSignal?: AbortSignal,
 ): Promise<T> {
+  // Pre-flight on caller signal: WHATWG DOM specifies that
+  // `addEventListener("abort", ...)` does NOT fire for a signal that is
+  // already aborted at the time of registration. The canonical idiom is
+  // the "check-then-listen" pattern.
+  //   https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/aborted
+  if (callerSignal?.aborted) {
+    throw new LinkgrepNetworkError("abort", "caller AbortSignal was already aborted", callerSignal.reason);
+  }
   // Back-compat: old signature accepted a bare `maxAttempts` number.
   const opts =
     typeof options === "number"
@@ -149,7 +158,24 @@ export async function withRetry<T>(
           }
         }
         onSleep?.(sleepMs);
-        await new Promise(r => setTimeout(r, sleepMs));
+        // Sleep is interruptible via callerSignal — pre-fix, a bare
+        // `setTimeout` swallowed mid-retry aborts (browser tab close, parent
+        // request cancellation). We race the sleep against the signal's
+        // abort. The setTimeout is cleared on abort to avoid keeping the
+        // event loop alive.
+        await new Promise<void>((resolve, reject) => {
+          const timerId = setTimeout(() => {
+            callerSignal?.removeEventListener("abort", onAbort);
+            resolve();
+          }, sleepMs);
+          const onAbort = () => {
+            clearTimeout(timerId);
+            reject(new LinkgrepNetworkError("abort", "caller AbortSignal fired during retry backoff", callerSignal!.reason));
+          };
+          if (callerSignal) {
+            callerSignal.addEventListener("abort", onAbort, { once: true });
+          }
+        });
       }
     }
   }

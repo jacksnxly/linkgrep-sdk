@@ -1,6 +1,17 @@
 import { LinkgrepError, LinkgrepNetworkError, isTerminalTransportError, parseErrorResponse } from "./errors.js";
 import { withRetry, type RetryOptions } from "./retry.js";
 
+/**
+ * Pluggable fetch implementation. Defaults to `globalThis.fetch`. Supply your
+ * own when running under Cloudflare Workers (use the binding's `fetch`), with
+ * a custom undici Agent (mTLS, certificate pinning, proxy), or in tests that
+ * cannot rely on MSW global interception (Web Workers, Bun, Deno).
+ *
+ * Shape matches the WHATWG `fetch` signature so existing implementations
+ * drop in without adapters.
+ */
+export type Fetcher = (input: string, init: RequestInit) => Promise<Response>;
+
 export interface HttpClientOptions {
   token: string;
   baseUrl?: string;
@@ -8,6 +19,19 @@ export interface HttpClientOptions {
   timeoutMs?: number;
   /** Retry policy. See RetryOptions for tunable knobs. Default: 3 attempts, 1s base, 60s cap. */
   retry?: RetryOptions;
+  /**
+   * Caller-supplied AbortSignal. Aborts the in-flight fetch and short-circuits
+   * any pending backoff sleep. Composed with the per-attempt timeout and the
+   * `retry.totalBudgetMs` budget via `AbortSignal.any` (Node 18.17+/20.3+).
+   * On engines without `AbortSignal.any`, the caller signal degrades to a
+   * pre-attempt check (still better than the pre-fix behavior where the SDK
+   * was uninterruptible mid-retry).
+   */
+  signal?: AbortSignal;
+  /**
+   * Pluggable fetch implementation. Default: `globalThis.fetch`.
+   */
+  fetch?: Fetcher;
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -88,12 +112,18 @@ export class HttpClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly retry: RetryOptions | undefined;
+  private readonly callerSignal: AbortSignal | undefined;
+  private readonly fetchImpl: Fetcher;
 
   constructor(opts: HttpClientOptions) {
     this.token = opts.token;
     this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.app";
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.retry = opts.retry;
+    this.callerSignal = opts.signal;
+    // Bind explicitly to avoid `Illegal invocation` on platforms (Workers,
+    // Deno) where `globalThis.fetch` is a method that requires `this`.
+    this.fetchImpl = opts.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
   /**
@@ -108,21 +138,31 @@ export class HttpClient {
    */
   async post<T>(path: string, body: unknown): Promise<T> {
     const run = async (perAttemptBudgetSignal?: AbortSignal): Promise<T> => {
-      // Per-attempt timeout. When `retry.totalBudgetMs` is set, withRetry
-      // hands us an additional signal that fires when the remaining budget
-      // expires — composed via AbortSignal.any so whichever fires first
-      // wins. Node 18.17+/20.3+ ship AbortSignal.any (MDN); the SDK's
-      // engines floor is `>=18`, so consumers on 18.0–18.16 lose the budget
-      // narrowing but still get the per-attempt timeout — a strict
-      // improvement over the pre-fix behavior where neither was bounded
-      // per-attempt by the budget.
+      // Per-attempt signal composition: the per-attempt timeout, the
+      // budget-derived signal (when `retry.totalBudgetMs` is set), and
+      // the caller-supplied signal all race for the abort — whichever
+      // fires first wins. Node 18.17+/20.3+ ship AbortSignal.any (MDN);
+      // the SDK's engines floor is `>=18`, so consumers on 18.0–18.16
+      // get only the per-attempt timeout — a strict improvement over
+      // the pre-fix behavior where neither budget nor caller signal
+      // applied at all.
+      //   https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static
+      if (this.callerSignal?.aborted) {
+        // Honor an already-aborted caller signal pre-flight; per WHATWG
+        // DOM, addEventListener("abort") does NOT fire for signals that
+        // are already aborted.
+        throw new LinkgrepNetworkError("abort", "caller AbortSignal was already aborted", this.callerSignal.reason);
+      }
       const perAttemptTimeout = AbortSignal.timeout(this.timeoutMs);
+      const signals: AbortSignal[] = [perAttemptTimeout];
+      if (perAttemptBudgetSignal) signals.push(perAttemptBudgetSignal);
+      if (this.callerSignal) signals.push(this.callerSignal);
       const signal =
-        perAttemptBudgetSignal !== undefined && typeof AbortSignal.any === "function"
-          ? AbortSignal.any([perAttemptTimeout, perAttemptBudgetSignal])
+        signals.length > 1 && typeof AbortSignal.any === "function"
+          ? AbortSignal.any(signals)
           : perAttemptTimeout;
 
-      const res = await fetch(`${this.baseUrl}${path}`, {
+      const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -184,8 +224,12 @@ export class HttpClient {
     // `LinkgrepNetworkError` instances are passed through unchanged so the
     // semantic `kind` (e.g. "oversize") survives — re-wrapping via .from()
     // would collapse every kind back to "network" via classify().
+    //
+    // The caller AbortSignal is also forwarded into withRetry so the
+    // backoff sleep is interruptible (pre-fix, `setTimeout` could not be
+    // cancelled mid-sleep).
     try {
-      return await withRetry(run, this.retry);
+      return await withRetry(run, this.retry, this.callerSignal);
     } catch (err) {
       if (err instanceof LinkgrepError) throw err;
       if (err instanceof LinkgrepNetworkError) throw err;
