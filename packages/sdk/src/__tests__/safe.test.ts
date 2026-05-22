@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "./msw-server.js";
-import { Linkgrep, NotFoundError, LinkgrepNetworkError, type Result } from "../index.js";
+import { Linkgrep, NotFoundError, InternalServerError, LinkgrepNetworkError, type Result } from "../index.js";
 
 const BASE = "https://api.linkgrep.app";
 
@@ -115,6 +115,59 @@ describe(".safe() variants", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.data.duplicate).toBe(true);
+    }
+  });
+
+  // Backfill (keryx C8): track.sale.safe previously had only success and
+  // 409-dedup coverage. Mirror the lead.safe HTTP-error + network-error
+  // tests so a future refactor that inverts Result polarity on sale would
+  // be caught by the same shape as lead.
+  it("track.sale.safe returns { ok: false, error } on HTTP error (does NOT throw)", async () => {
+    server.use(
+      http.post(`${BASE}/api/track/sale`, () =>
+        HttpResponse.json(
+          { error: { code: "internal_error", message: "boom", doc_url: "https://x" } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    const linkgrep = new Linkgrep({
+      token: "k",
+      baseUrl: BASE,
+      // Disable retry so the 500 surfaces immediately; retry semantics are
+      // covered in retry.test.ts.
+      retry: { maxAttempts: 1 },
+    });
+    const result = await linkgrep.track.sale.safe({
+      customerExternalId: "u1",
+      amount: 100,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(InternalServerError);
+      expect((result.error as InternalServerError).status).toBe(500);
+    }
+  });
+
+  it("track.sale.safe wraps network errors as LinkgrepNetworkError (does NOT throw)", async () => {
+    server.use(
+      http.post(`${BASE}/api/track/sale`, () => HttpResponse.error()),
+    );
+
+    const linkgrep = new Linkgrep({ token: "k", baseUrl: BASE });
+    const result = await linkgrep.track.sale.safe({
+      customerExternalId: "u1",
+      amount: 100,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(LinkgrepNetworkError);
+      if (result.error instanceof LinkgrepNetworkError) {
+        expect(result.error.kind).toBe("network");
+      }
     }
   });
 });

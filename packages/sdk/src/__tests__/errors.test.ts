@@ -6,8 +6,11 @@ import {
   LinkgrepError,
   BadRequestError,
   AuthenticationError,
+  PermissionError,
   NotFoundError,
   ConflictError,
+  GoneError,
+  UnprocessableEntityError,
   RateLimitError,
   InternalServerError,
 } from "../index.js";
@@ -55,10 +58,21 @@ describe("error parsing", () => {
   });
 
   it("maps each documented status to its subclass", { timeout: 30000 }, async () => {
+    // 409 is exercised separately via the .safe() dedup tests — mapConflict
+    // (http/errors.ts) catches ConflictError and translates it into
+    // { duplicate: true } before it reaches the throwing entry point, so the
+    // try/throw shape below does not work for that status. ConflictError is
+    // verified at the parseErrorResponse layer transitively through that path.
     const cases: Array<[number, new (...args: never[]) => LinkgrepError, string]> = [
       [400, BadRequestError, "bad_request"],
       [401, AuthenticationError, "unauthorized"],
+      // Backfill (keryx C7): 403/410/422 had no instanceof assertion before;
+      // a regression that collapsed parseErrorResponse to the base class for
+      // these statuses would not have been caught.
+      [403, PermissionError, "permission_denied"],
       [404, NotFoundError, "not_found"],
+      [410, GoneError, "gone"],
+      [422, UnprocessableEntityError, "unprocessable"],
       [429, RateLimitError, "rate_limited"],
       [500, InternalServerError, "internal_error"],
     ];
