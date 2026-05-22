@@ -382,6 +382,26 @@ export function mapConflict<T>(
 }
 
 /**
+ * Lightweight runtime guard at the JSON-parse seam (keryx I-12). The SDK's
+ * track responses (`TrackLeadResponse`, `TrackSaleResponse`) are all-optional
+ * shapes, so the only structural drift this guard catches is "server returned
+ * something that is not a plain JSON object" — array, primitive, etc. That's
+ * sufficient to turn the previous unsound `parsed as T` cast in `HttpClient.post`
+ * into a tagged transport failure, without imposing a per-field schema that
+ * would break on legitimate server-side optional-field changes.
+ *
+ * Hand-rolled (no Zod) to preserve the SDK's small install footprint.
+ */
+export function assertResponseObject(parsed: unknown, endpoint: string): asserts parsed is Record<string, unknown> {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new LinkgrepNetworkError(
+      "network",
+      `${endpoint}: response body is not a JSON object (got ${parsed === null ? "null" : Array.isArray(parsed) ? "array" : typeof parsed})`,
+    );
+  }
+}
+
+/**
  * Wrap a throwing async operation into a Result. Used by .safe() variants.
  * The error branch is a sealed discriminated union: either a `LinkgrepError`
  * (server returned a response with a recognized error envelope) or a

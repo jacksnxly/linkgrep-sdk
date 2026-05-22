@@ -72,6 +72,11 @@ export function linkgrepAnalytics(
             // failures are observable via console.warn instead of being
             // silently swallowed by better-auth's catch-all. The auth flow
             // never breaks on attribution failure.
+            // `mode` is intentionally omitted — the SDK derives it from
+            // `clickId` presence (`fire-and-forget` when present, `deferred`
+            // when not). Pre-fix (keryx I-14), this adapter encoded the rule
+            // itself; the move into createLeadTracker means every other
+            // adapter (NextAuth, Lucia, Hono, …) inherits the same semantics.
             ctx.context.runInBackground(
               opts.client.track.lead
                 .safe({
@@ -80,7 +85,6 @@ export function linkgrepAnalytics(
                   customerExternalId: newUser.id,
                   customerEmail: newUser.email ?? undefined,
                   customerName: newUser.name ?? undefined,
-                  mode: clickId ? "fire-and-forget" : "deferred",
                 })
                 .then((result) => {
                   if (!result.ok) {

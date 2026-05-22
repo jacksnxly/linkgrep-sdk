@@ -5,6 +5,7 @@ import type {
   TrackLeadWire,
 } from "../types.js";
 import {
+  assertResponseObject,
   mapConflict,
   toResult,
   type LinkgrepError,
@@ -30,6 +31,19 @@ export interface LeadTracker {
   safe(
     input: TrackLeadInput,
   ): Promise<Result<TrackLeadResult, LinkgrepError | LinkgrepNetworkError>>;
+}
+
+/**
+ * Default `mode` selection when the caller omits it: with a `clickId`, the
+ * attribution can resolve immediately so the server can fire-and-forget;
+ * without one, it must defer until a later click match arrives. Moving the
+ * rule into the SDK (was previously in `@linkgrep/better-auth`, keryx I-14)
+ * means every adapter package (NextAuth, Lucia, Hono, …) inherits the same
+ * domain semantics without rediscovering them. Callers can still pass an
+ * explicit `mode` to override.
+ */
+function defaultMode(clickId: string | undefined): "fire-and-forget" | "deferred" {
+  return clickId ? "fire-and-forget" : "deferred";
 }
 
 export function createLeadTracker(http: HttpClient): LeadTracker {
@@ -60,13 +74,33 @@ export function createLeadTracker(http: HttpClient): LeadTracker {
       },
       // Do not change — server rejects "async"; Zod .default() never fires
       // because the SDK does not .parse() before sending.
-      mode: mode ?? "fire-and-forget",
+      mode: mode ?? defaultMode(clickId),
       metadata,
     };
+    // Reverse-direction ACL guard (keryx I-16): every TrackLeadWire field
+    // must be acknowledged in this constructor. Adding a wire-only field
+    // without populating it here is a compile error — the Record literal
+    // below has to list every key, and TS rejects missing keys.
+    const _wireKeysCovered: Record<keyof TrackLeadWire, true> = {
+      clickId: true,
+      eventName: true,
+      customer: true,
+      mode: true,
+      metadata: true,
+    };
+    void _wireKeysCovered;
     // 409 → duplicate. Server returns no body on conflict; the SDK synthesizes
     // a marker so callers can branch on `result.duplicate` without parsing the
     // error envelope. See http/errors.ts:mapConflict for the shared translation.
-    return mapConflict(http.post<TrackLeadResponse>("/api/track/lead", wire));
+    // assertResponseObject validates that the server's success body is a
+    // JSON object (not array / primitive) before downstream consumers cast
+    // it into `TrackLeadResponse` (keryx I-12).
+    return mapConflict(
+      http.post<unknown>("/api/track/lead", wire).then((parsed): TrackLeadResponse => {
+        assertResponseObject(parsed, "/api/track/lead");
+        return parsed as TrackLeadResponse;
+      }),
+    );
   }
   // Build the LeadTracker object explicitly via Object.assign so TS verifies
   // the `.safe` member is attached. The pre-D2 pattern (`return lead as

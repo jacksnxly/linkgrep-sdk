@@ -10,45 +10,34 @@
 // server but missing here, file an issue — and consider adding a contract
 // test against the server's OpenAPI / schema snapshot.
 
-// ---------- Branded ID types (D5) ----------
-// Nominal type-safety for the four externally-distinct linkgrep IDs.
-// Canonical TypeScript branded-type pattern (`T & { __brand: K }`) — see
-// https://www.learningtypescript.com/articles/branded-types and the
-// well-documented "Mars Climate Orbiter" unit-confusion class of bugs.
-//
-// All four brands are structurally `string` at runtime — passing them to
-// any `string` API works without conversion. The brands fire ONLY at the
-// type checker, where they prevent the canonical foot-guns: passing a
-// CustomerId where a CustomerExternalId is expected, or a ClickId where a
-// CommissionId is expected, etc.
-//
-// Consumers obtain branded values via the `as*` helpers (asClickId,
-// asCustomerExternalId, asCustomerId, asInvoiceId). Inputs continue to
-// accept plain `string`; the brands flow OUT of responses for downstream
-// type-safety in attribution chains.
-export type ClickId = string & { readonly __brand: "ClickId" };
-export type CustomerExternalId = string & { readonly __brand: "CustomerExternalId" };
-export type CustomerId = string & { readonly __brand: "CustomerId" };
-export type InvoiceId = string & { readonly __brand: "InvoiceId" };
-
-/** Opt-in brand helper. The runtime is a no-op; the brand is a TS-only marker. */
-export const asClickId = (s: string): ClickId => s as ClickId;
-/** Opt-in brand helper. The runtime is a no-op; the brand is a TS-only marker. */
-export const asCustomerExternalId = (s: string): CustomerExternalId => s as CustomerExternalId;
-/** Opt-in brand helper. The runtime is a no-op; the brand is a TS-only marker. */
-export const asCustomerId = (s: string): CustomerId => s as CustomerId;
-/** Opt-in brand helper. The runtime is a no-op; the brand is a TS-only marker. */
-export const asInvoiceId = (s: string): InvoiceId => s as InvoiceId;
+// ---------- ID types ----------
+// IDs are plain `string` on both inputs and outputs. The pre-fix branded
+// types (`string & { __brand: "ClickId" }`) didn't fire on inputs because
+// every input field was `Brand | string` — the `| string` arm neutered the
+// brand on the call site (keryx I-7, validated 2026-05-22T1455Z). Removing
+// brands matches the mature-SDK precedent in JS-land: AWS SDK, Stripe SDK,
+// OpenAI SDK, Resend, and Vercel SDK all use plain `string` for IDs. The
+// `as*` helpers and `__brand` markers are gone.
 
 // ---------- Public SDK input (flat, ergonomic) ----------
 export interface TrackLeadInput {
-  /** Click attribution token (from cookie `lgr_id` or `?lg_id=`). Brand: ClickId. */
-  clickId?: ClickId | string;
+  /** Click attribution token (from cookie `lgr_id` or `?lg_id=`). */
+  clickId?: string;
   eventName: string;
-  /** Your own user/customer identifier. Brand: CustomerExternalId. */
-  customerExternalId: CustomerExternalId | string;
+  /** Your own user/customer identifier. */
+  customerExternalId: string;
   customerName?: string;
   customerEmail?: string;
+  /**
+   * Server-side processing mode. Defaults to `"fire-and-forget"` when a
+   * `clickId` is present (the attribution can resolve immediately) and
+   * `"deferred"` when it isn't (the server must await a later click match).
+   * Override only when you know what you want.
+   *
+   * - `"wait"`         — block until the server resolves attribution
+   * - `"fire-and-forget"` — server processes asynchronously; SDK returns immediately
+   * - `"deferred"`     — server stores the lead and waits for a future click match
+   */
   mode?: "wait" | "fire-and-forget" | "deferred";
   metadata?: Record<string, unknown>;
 }
@@ -66,19 +55,13 @@ export interface TrackLeadWire {
   metadata?: Record<string, unknown>;
 }
 
-// ---------- Lead response (server may include attribution chain) ----------
+// ---------- Lead response ----------
 // Duplicate (HTTP 409) outcome is modeled as a separate branch in
 // `TrackLeadResult` (see track/lead.ts) instead of as an optional field on
 // this shape, so the discriminated union narrows cleanly via `"duplicate" in r`.
-//
-// IDs carry brand types out of responses so consumers can pipe a `CustomerId`
-// or `ClickId` into a follow-up SDK call and the type checker prevents
-// accidental swaps with other ID-shaped strings. Brands are structurally
-// `string`; existing code that destructures `customerId` into a plain
-// `string` keeps working.
 export interface TrackLeadResponse {
-  customerId?: CustomerId;
-  clickId?: ClickId;
+  customerId?: string;
+  clickId?: string;
   partnerId?: string;
   programId?: string;
   commissionId?: string;
@@ -88,15 +71,27 @@ export interface TrackLeadResponse {
 // ---------- Sale input (flat ergonomic shape consumers pass) ----------
 // `paymentProcessor` and `eventName` are NOT accepted by the server — do not
 // add. The compile-time exhaustiveness guard in track/sale.ts catches drift.
+//
+// At least one of `clickId`, `invoiceId`, or `customerExternalId` MUST be
+// supplied (keryx I-15, 2026-05-22T1455Z — the asymmetry vs Lead is
+// intentional). Lead requires `customerExternalId` because the linkgrep
+// server uses it to create the customer record at attribution-resolution
+// time; Sale can attribute via any of the three because the customer
+// already exists (it was created by a prior Lead or via the dashboard).
+// The SDK does NOT enforce the "at least one" rule at compile time — modeling
+// it as a discriminated union (`SaleByClick | SaleByInvoice | SaleByCustomer`)
+// would force every caller into a tagged union shape that few real workloads
+// have. The server rejects a Sale with all three omitted; consumers see a
+// `BadRequestError` with `code: "bad_request"`.
 export interface TrackSaleInput {
-  /** Click attribution token. Brand: ClickId. */
-  clickId?: ClickId | string;
-  /** Your own user/customer identifier. Brand: CustomerExternalId. */
-  customerExternalId?: CustomerExternalId | string;
+  /** Click attribution token. */
+  clickId?: string;
+  /** Your own user/customer identifier. */
+  customerExternalId?: string;
   amount: number;
   currency?: string;
-  /** Invoice identifier — server's idempotency key. Brand: InvoiceId. */
-  invoiceId?: InvoiceId | string;
+  /** Invoice identifier — server's idempotency key (Redis SET NX, 7-day TTL). */
+  invoiceId?: string;
   leadEventName?: string;
   metadata?: Record<string, unknown>;
 }

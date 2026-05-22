@@ -5,6 +5,7 @@ import type {
   TrackSaleWire,
 } from "../types.js";
 import {
+  assertResponseObject,
   mapConflict,
   toResult,
   type LinkgrepError,
@@ -60,7 +61,26 @@ export function createSaleTracker(http: HttpClient): SaleTracker {
       leadEventName,
       metadata,
     };
-    return mapConflict(http.post<TrackSaleResponse>("/api/track/sale", wire));
+    // Reverse-direction ACL guard (keryx I-16): mirrors track/lead.ts.
+    // Adding a TrackSaleWire field without listing it here is a compile error.
+    const _wireKeysCovered: Record<keyof TrackSaleWire, true> = {
+      clickId: true,
+      customerExternalId: true,
+      amount: true,
+      currency: true,
+      invoiceId: true,
+      leadEventName: true,
+      metadata: true,
+    };
+    void _wireKeysCovered;
+    // Lightweight shape guard at the parse seam (keryx I-12) — see
+    // track/lead.ts for rationale.
+    return mapConflict(
+      http.post<unknown>("/api/track/sale", wire).then((parsed): TrackSaleResponse => {
+        assertResponseObject(parsed, "/api/track/sale");
+        return parsed as TrackSaleResponse;
+      }),
+    );
   }
   // Object.assign mirror of track/lead.ts — type-checks the .safe attachment
   // instead of relying on an unsafe `as SaleTracker` cast (keryx C2).
