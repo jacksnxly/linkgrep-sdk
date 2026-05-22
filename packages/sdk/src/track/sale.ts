@@ -1,6 +1,7 @@
 import type { HttpClient } from "../http/client.js";
 import type { TrackSaleInput, TrackSaleResponse } from "../types.js";
 import {
+  ConflictError,
   toResult,
   type LinkgrepError,
   type Result,
@@ -15,7 +16,13 @@ export interface SaleTracker {
 
 export function createSaleTracker(http: HttpClient): SaleTracker {
   function sale(input: TrackSaleInput): Promise<TrackSaleResponse> {
-    return http.post<TrackSaleResponse>("/api/track/sale", input);
+    // 409 → duplicate. See track/lead.ts for rationale.
+    return http.post<TrackSaleResponse>("/api/track/sale", input).catch((e) => {
+      if (e instanceof ConflictError) {
+        return { duplicate: true } satisfies TrackSaleResponse;
+      }
+      throw e;
+    });
   }
   sale.safe = (input: TrackSaleInput) => toResult(sale(input));
   return sale as SaleTracker;

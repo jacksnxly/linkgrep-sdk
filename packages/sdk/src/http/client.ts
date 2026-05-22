@@ -1,25 +1,37 @@
-import { parseErrorResponse } from "./errors.js";
+import { ConflictError, parseErrorResponse } from "./errors.js";
 import { withRetry } from "./retry.js";
 
 export interface HttpClientOptions {
   token: string;
   baseUrl?: string;
+  /** Per-request timeout in milliseconds. Default 10s. */
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 10_000;
 
 export class HttpClient {
   private readonly token: string;
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(opts: HttpClientOptions) {
     this.token = opts.token;
     this.baseUrl = opts.baseUrl ?? "https://api.linkgrep.app";
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
+  /**
+   * NOTE on idempotency: the linkgrep server does NOT honor an `Idempotency-Key`
+   * header. Sale idempotency is keyed on `invoiceId` in the request body (Redis
+   * SET NX, 7-day TTL). Lead idempotency is keyed on workspace+customer+event.
+   * Do not add a header here — it would be silently ignored.
+   *
+   * 409 handling lives in the track namespace, not here — see track/lead.ts and
+   * track/sale.ts. A generic transport must not assume any specific response
+   * shape on conflict.
+   */
   async post<T>(path: string, body: unknown): Promise<T> {
-    // NOTE on idempotency: the linkgrep server does NOT honor an `Idempotency-Key`
-    // header. Sale idempotency is keyed on `invoiceId` in the request body (Redis
-    // SET NX, 7-day TTL). Lead idempotency is keyed on workspace+customer+event.
-    // Do not add a header here — it would be silently ignored.
     const run = async (): Promise<T> => {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
@@ -28,13 +40,10 @@ export class HttpClient {
           Authorization: `Bearer ${this.token}`,
         },
         body: JSON.stringify(body),
+        // AbortSignal.timeout throws DOMException("...", "TimeoutError") on fire
+        // (MDN). retry.ts treats both Abort/Timeout as terminal.
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
-
-      // 409 from /api/track/* has no body — synthesize a client-side marker
-      // so consumers can branch on `result.duplicate` without parsing.
-      if (res.status === 409) {
-        return { duplicate: true } as T;
-      }
 
       if (!res.ok) {
         const errorBody: unknown = await res.json().catch(() => null);
@@ -47,3 +56,6 @@ export class HttpClient {
     return withRetry(run);
   }
 }
+
+// Re-exported so track/* can catch on it without reaching into errors.js.
+export { ConflictError };

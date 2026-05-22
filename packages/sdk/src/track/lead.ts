@@ -5,6 +5,7 @@ import type {
   TrackLeadWire,
 } from "../types.js";
 import {
+  ConflictError,
   toResult,
   type LinkgrepError,
   type Result,
@@ -48,7 +49,16 @@ export function createLeadTracker(http: HttpClient): LeadTracker {
       mode: mode ?? "fire-and-forget",
       metadata,
     };
-    return http.post<TrackLeadResponse>("/api/track/lead", wire);
+    // 409 → duplicate. Server returns no body on conflict; the SDK synthesizes
+    // a marker so callers can branch on `result.duplicate` without parsing the
+    // error envelope. Per-endpoint handling keeps the generic HttpClient honest
+    // about the response type it returns.
+    return http.post<TrackLeadResponse>("/api/track/lead", wire).catch((e) => {
+      if (e instanceof ConflictError) {
+        return { duplicate: true } satisfies TrackLeadResponse;
+      }
+      throw e;
+    });
   }
   lead.safe = (input: TrackLeadInput) => toResult(lead(input));
   return lead as LeadTracker;
