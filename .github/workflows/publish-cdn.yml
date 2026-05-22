@@ -24,13 +24,19 @@ name: Publish CDN
 # in the Cloudflare dashboard; DNS CNAME from cdn.linkgrep.xyz to the
 # bucket's public R2 endpoint).
 #
-# CORS policy lives in `.github/cdn-cors.json` (Access-Control-Allow-Origin: *
-# + GET/HEAD — matches Stripe.js / Segment / Plausible / jsDelivr empirically).
-# Apply once after bucket creation (idempotent — re-run is safe):
+# Uses the S3-compatible R2 API rather than `wrangler r2 object put`
+# because Account API tokens (cfat_*) — which are the canonical R2 CI
+# token type — use Signature V4 auth, not Bearer. wrangler attempts a
+# `/memberships` preflight call that requires user-scope permissions
+# the Account token does not have. aws-cli + the S3 endpoint is the
+# Cloudflare-recommended CI path for R2 uploads.
 #
-#   CLOUDFLARE_API_TOKEN=...  CLOUDFLARE_ACCOUNT_ID=...  \
-#     npx wrangler r2 bucket cors set linkgrep-cdn \
-#       --file .github/cdn-cors.json
+# CORS policy is set ONCE at bucket creation time via the Cloudflare
+# dashboard (R2 → bucket → Settings → CORS Policy) — not from this
+# workflow, because object-write-scoped tokens cannot mutate bucket
+# settings (correct least-privilege posture for CI). The policy that
+# matches Stripe.js / Segment / Plausible / jsDelivr is captured in
+# `.github/cdn-cors.json` for manual reference.
 on:
   workflow_dispatch:
     inputs:
@@ -89,16 +95,19 @@ jobs:
         run: |
           set -euo pipefail
           missing=""
-          [ -z "${CLOUDFLARE_API_TOKEN:-}" ] && missing="$missing CLOUDFLARE_API_TOKEN"
-          [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ -z "${R2_ACCESS_KEY_ID:-}" ]     && missing="$missing R2_ACCESS_KEY_ID"
+          [ -z "${R2_SECRET_ACCESS_KEY:-}" ] && missing="$missing R2_SECRET_ACCESS_KEY"
+          [ -z "${R2_ENDPOINT:-}" ]          && missing="$missing R2_ENDPOINT"
           if [ -n "$missing" ]; then
             echo "::error::Missing required secrets:$missing"
-            echo "::error::Wire under repo Settings → Secrets → Actions. The API token needs R2:Edit on bucket '${R2_BUCKET}'."
+            echo "::error::Wire under repo Settings → Secrets → Actions. Get the values from"
+            echo "::error::Cloudflare → R2 → Manage R2 API Tokens → object-scoped token for bucket '${R2_BUCKET}'."
             exit 1
           fi
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT:          ${{ secrets.R2_ENDPOINT }}
 
       # Exact-version upload — IMMUTABLE.
       # Pattern: max-age=31536000 + immutable tells the browser AND
@@ -107,15 +116,16 @@ jobs:
       # for versioned static assets.
       - name: Upload exact-version artifact (immutable)
         run: |
-          npx wrangler r2 object put \
-            "${R2_BUCKET}/script/v${VERSION}/script.js" \
-            --file "${ARTIFACT}" \
+          aws s3 cp "${ARTIFACT}" \
+            "s3://${R2_BUCKET}/script/v${VERSION}/script.js" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --region auto \
             --content-type "application/javascript; charset=utf-8" \
-            --cache-control "public, max-age=31536000, immutable" \
-            --remote
+            --cache-control "public, max-age=31536000, immutable"
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT:           ${{ secrets.R2_ENDPOINT }}
 
       # Major-pinned upload — MUTABLE.
       # Pattern: max-age=300 (5 min) lets the edge serve fast but recovers
@@ -124,15 +134,39 @@ jobs:
       # mutable to support in-major hotfixes without a customer redeploy.
       - name: Upload major-pinned artifact (mutable, short cache)
         run: |
-          npx wrangler r2 object put \
-            "${R2_BUCKET}/script/v${MAJOR}/script.js" \
-            --file "${ARTIFACT}" \
+          aws s3 cp "${ARTIFACT}" \
+            "s3://${R2_BUCKET}/script/v${MAJOR}/script.js" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --region auto \
             --content-type "application/javascript; charset=utf-8" \
-            --cache-control "public, max-age=300, s-maxage=300" \
-            --remote
+            --cache-control "public, max-age=300, s-maxage=300"
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT:           ${{ secrets.R2_ENDPOINT }}
+
+      # Post-upload smoke test: fetch the just-uploaded URL via the public
+      # CDN domain and verify (a) it returns 200, (b) the CORS header is
+      # set (proves the one-time CORS policy is applied to the bucket),
+      # (c) the artifact actually reached the edge.
+      - name: Verify CDN serves the uploaded artifact
+        run: |
+          URL="https://cdn.linkgrep.xyz/script/v${VERSION}/script.js"
+          # Allow up to 30 s for Cloudflare's edge to propagate.
+          for i in 1 2 3 4 5 6; do
+            if HDRS=$(curl -fsSI -A "publish-cdn-smoketest" "$URL" 2>&1); then
+              echo "$HDRS"
+              echo "$HDRS" | grep -i "^access-control-allow-origin: \*" >/dev/null || {
+                echo "::warning::CDN responded but CORS header missing. Apply CORS policy from .github/cdn-cors.json"
+                echo "::warning::via Cloudflare dashboard (R2 → ${R2_BUCKET} → Settings → CORS Policy)."
+              }
+              echo "::notice::✓ ${URL} (HTTP 200, ${i} attempt$([ $i -eq 1 ] || echo s))"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::CDN did not serve ${URL} within 30 s. Check R2 bucket binding and cdn.linkgrep.xyz CNAME."
+          exit 1
 
       - name: Report upload
         run: |

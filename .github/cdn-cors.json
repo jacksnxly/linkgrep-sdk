@@ -1,9 +1,14 @@
-[
-  {
-    "AllowedOrigins": ["*"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag", "Content-Length", "Content-Type", "Cache-Control"],
-    "MaxAgeSeconds": 86400
-  }
-]
+{
+  "rules": [
+    {
+      "id": "public-cdn-read",
+      "allowed": {
+        "methods": ["GET", "HEAD"],
+        "origins": ["*"],
+        "headers": ["*"]
+      },
+      "exposeHeaders": ["ETag", "Content-Length", "Content-Type", "Cache-Control"],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}
