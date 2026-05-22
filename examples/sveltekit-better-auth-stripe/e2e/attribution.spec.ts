@@ -13,29 +13,36 @@ test.describe("linkgrep attribution flow", () => {
     }).toBe("e2e_test_click_123");
   });
 
-  test("track.lead is called on signup with the captured clickId", async ({ page }) => {
-    const trackLeadRequests: Record<string, unknown>[] = [];
-    await page.route("**/api/track/lead", async route => {
-      trackLeadRequests.push(route.request().postDataJSON());
-      await route.fulfill({ status: 201, body: JSON.stringify({ customerId: "cus_e2e" }) });
-    });
-
+  // NOTE: the assertion "track.lead is called on signup with the captured
+  // clickId" — exercising the @linkgrep/better-auth plugin's after-hook —
+  // cannot be observed end-to-end via Playwright's `page.route` because the
+  // outbound POST originates in the SvelteKit *server* process
+  // (better-auth's runInBackground → @linkgrep/sdk → api.linkgrep.app), not
+  // in the browser. `page.route` intercepts browser fetches only. The same
+  // behavior is verified deterministically at the unit level with MSW Node
+  // in packages/better-auth/src/__tests__/plugin.test.ts (6 tests covering
+  // sign-up vs sign-in, cookie modes, payload shape). Reproducing it in e2e
+  // would require MSW-Node inside the SvelteKit dev server or a fan-out
+  // proxy — disproportionate complexity for assertions already covered.
+  //
+  // The HAPPY-PATH proof we CAN do end-to-end: the form submits and the
+  // page redirects to / on success (proves the better-auth route is wired
+  // and signup actually creates a user).
+  test("signup form submits successfully and redirects to /", async ({ page }) => {
     await page.goto("/?lg_id=e2e_signup_click");
     await page.goto("/signup");
     await page.fill('[name="email"]', `e2e_${Date.now()}@test.com`);
     await page.fill('[name="password"]', "password123");
 
-    // Init the listener BEFORE the action that triggers the request, then
-    // await both together — Playwright network docs canonical pattern.
     await Promise.all([
-      page.waitForRequest("**/api/track/lead"),
+      page.waitForURL("**/", { timeout: 15_000 }),
       page.click('button[type="submit"]'),
     ]);
 
-    expect(trackLeadRequests.length).toBeGreaterThan(0);
-    const body = trackLeadRequests[0];
-    expect(body.eventName).toBe("Sign Up");
-    expect((body.customer as Record<string, unknown>).externalId).toBeTruthy();
+    // On success the signup page navigates to "/" — confirms the better-auth
+    // route accepted the credentials and created a session. The track.lead
+    // server-side call (and its payload shape) is covered by unit tests.
+    expect(page.url()).toMatch(/\/$/);
   });
 
   // Regression for keryx #C1: the /lgr proxy must NOT match paths like
@@ -81,6 +88,13 @@ test.describe("linkgrep attribution flow", () => {
     });
 
     await page.goto("/pricing");
+    // Svelte 5 binds `on:click` during client-side hydration. Without
+    // waiting for the hydration JS to land + run, page.click can fire on a
+    // not-yet-bound button (no-op) and waitForRequest sees nothing. Wait
+    // for networkidle so the dev-server's module graph + hydration JS have
+    // settled before clicking. Recommended Playwright pattern for SPAs:
+    // https://playwright.dev/docs/api/class-page#page-wait-for-load-state
+    await page.waitForLoadState("networkidle");
     await Promise.all([
       page.waitForRequest("**/create-checkout"),
       page.click('[data-plan="pro"]'),
