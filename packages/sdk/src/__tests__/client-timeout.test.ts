@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { http, passthrough } from "msw";
+import { server as mswServer } from "./msw-server.js";
 import { HttpClient } from "../http/client.js";
 import { LinkgrepError } from "../http/errors.js";
+
+// The shared MSW server intercepts every fetch (onUnhandledRequest: "error").
+// This test hits a real localhost server, so register a passthrough for it.
+beforeAll(() => {
+  mswServer.use(http.all(/^http:\/\/127\.0\.0\.1:\d+\//, () => passthrough()));
+});
 
 // Regression for keryx #I1: `res.json().catch(() => null)` in HttpClient.post
 // swallows TimeoutError thrown during the body stream of an error response.

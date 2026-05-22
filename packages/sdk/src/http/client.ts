@@ -46,7 +46,15 @@ export class HttpClient {
       });
 
       if (!res.ok) {
-        const errorBody: unknown = await res.json().catch(() => null);
+        // Narrow the swallow to JSON parse errors. AbortSignal.timeout binds
+        // to the body stream (per MDN AbortSignal), so a timer that fires
+        // mid-body-read makes res.json() reject with TimeoutError — that must
+        // propagate so retry.ts can treat it as terminal, not get reclassified
+        // as a retryable 5xx via parseErrorResponse(res, null).
+        const errorBody: unknown = await res.json().catch((e: unknown) => {
+          if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
+          return null;
+        });
         throw parseErrorResponse(res, errorBody);
       }
 
