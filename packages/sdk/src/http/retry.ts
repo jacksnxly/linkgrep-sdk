@@ -17,9 +17,21 @@ export interface RetryOptions {
   baseDelayMs?: number;
   /** Hard ceiling on the SDK's wait for server Retry-After, in ms. Default: 60_000. */
   maxRetryAfterMs?: number;
+  /**
+   * Overall wall-time budget (in ms) across all attempts AND sleeps for a
+   * single .post() call. Opt-in; when undefined the SDK has no total budget
+   * (current behavior). When set, withRetry throws the most recent error
+   * before any sleep that would exceed `startedAt + totalBudgetMs`.
+   *
+   * Mirrors the canonical split between per-attempt timeout (`timeoutMs`)
+   * and total call deadline in mature HTTP clients — gRPC "deadline",
+   * Apache HttpClient `request_timeout` vs `socket_timeout`, AWS SDK
+   * `call_attempt_timeout` vs `call_timeout`.
+   */
+  totalBudgetMs?: number;
 }
 
-const DEFAULT_RETRY: Required<RetryOptions> = {
+const DEFAULT_RETRY: Required<Omit<RetryOptions, "totalBudgetMs">> = {
   maxAttempts: 3,
   baseDelayMs: 1000,
   maxRetryAfterMs: 60_000,
@@ -34,7 +46,8 @@ export async function withRetry<T>(
     typeof options === "number"
       ? { ...DEFAULT_RETRY, maxAttempts: options }
       : { ...DEFAULT_RETRY, ...options };
-  const { maxAttempts, baseDelayMs, maxRetryAfterMs } = opts;
+  const { maxAttempts, baseDelayMs, maxRetryAfterMs, totalBudgetMs } = opts;
+  const startedAt = Date.now();
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -80,6 +93,16 @@ export async function withRetry<T>(
             Math.max(retryAfterMs + floorJitter, jitter),
             maxRetryAfterMs,
           );
+        }
+        // Total-budget gate: if the projected sleep would push the overall
+        // wall time past the caller-specified ceiling, give up now rather
+        // than sleep first and throw later. Without this, a caller's
+        // `timeoutMs: 1000` could still block ~10s on a 429+Retry-After loop.
+        if (totalBudgetMs !== undefined) {
+          const elapsed = Date.now() - startedAt;
+          if (elapsed + sleepMs >= totalBudgetMs) {
+            throw lastError;
+          }
         }
         await new Promise(r => setTimeout(r, sleepMs));
       }

@@ -153,6 +153,46 @@ describe("withRetry", () => {
     expect(attempts).toBe(1);
   });
 
+  // Regression for keryx Important #5 (validated 2026-05-22): withRetry must
+  // honor an opt-in `totalBudgetMs` ceiling on overall wall time, including
+  // sleeps. Pre-fix a single call with `timeoutMs: 1000` against a
+  // 429 + Retry-After: 5 upstream blocked for ~10.5s (10.51× the per-attempt
+  // setting). The new knob mirrors the well-established split between
+  // per-attempt and total-call timeouts (gRPC "deadline" / Apache HttpClient
+  // "request_timeout" vs "socket_timeout").
+  //
+  // Behavioral assertion via fake timers (canonical vitest pattern, no
+  // setTimeout-spy coupling).
+  it("respects totalBudgetMs and throws lastError before the next sleep would exceed the cap", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempts = 0;
+      const fn = vi.fn(async () => {
+        attempts++;
+        throw new RateLimitError({
+          status: 429,
+          code: "rate_limited",
+          message: "Slow down",
+          raw: null,
+          headers: new Headers({ "retry-after": "10" }),
+          retryAfter: 10,
+        });
+      });
+
+      const p = withRetry(fn, { maxAttempts: 5, totalBudgetMs: 2000 }).catch(e => e);
+
+      // First attempt fires immediately; the next sleep would be ≥10s
+      // (Retry-After: 10 + floorJitter), well past the 2s budget. The
+      // retry loop must NOT sleep and must throw the lastError now.
+      await vi.advanceTimersByTimeAsync(0);
+      const err = await p;
+      expect(err).toBeInstanceOf(RateLimitError);
+      expect(fn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Verifies the back-compat path: passing a bare number still works.
   it("back-compat: accepts a bare maxAttempts number", async () => {
     let attempts = 0;
