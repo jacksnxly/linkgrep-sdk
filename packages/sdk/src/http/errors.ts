@@ -256,6 +256,12 @@ export function mapConflict<T extends { duplicate?: boolean }>(
  * (server returned a response with a recognized error envelope) or a
  * `LinkgrepNetworkError` (transport failure — DNS, abort, timeout). Consumers
  * narrow exhaustively via `instanceof LinkgrepError` or `error.kind`.
+ *
+ * Post-A1: HttpClient.post already wraps transport failures into
+ * LinkgrepNetworkError at the seam, so errors reaching here are typed members
+ * of the union. The defensive `.from()` fallback below catches any future code
+ * path that throws an unwrapped error (e.g. a programming bug in mapConflict)
+ * so the public Result contract still holds end-to-end.
  */
 export async function toResult<T>(
   promise: Promise<T>,
@@ -263,7 +269,7 @@ export async function toResult<T>(
   try {
     return { ok: true, data: await promise };
   } catch (err) {
-    if (err instanceof LinkgrepError) {
+    if (err instanceof LinkgrepError || err instanceof LinkgrepNetworkError) {
       return { ok: false, error: err };
     }
     return { ok: false, error: LinkgrepNetworkError.from(err) };

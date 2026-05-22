@@ -1,4 +1,4 @@
-import { parseErrorResponse } from "./errors.js";
+import { LinkgrepError, LinkgrepNetworkError, parseErrorResponse } from "./errors.js";
 import { withRetry, type RetryOptions } from "./retry.js";
 
 export interface HttpClientOptions {
@@ -65,7 +65,17 @@ export class HttpClient {
       return res.json() as Promise<T>;
     };
 
-    return withRetry(run, this.retry);
+    // Wrap transport failures in the sealed LinkgrepNetworkError union so the
+    // throwing entry points honor the same contract as `.safe()` / `toResult`.
+    // Without this seam, raw DOMException("TimeoutError"|"AbortError") and
+    // TypeError("fetch failed") leak past the documented union — defeating
+    // `try { ... } catch (e instanceof LinkgrepError) { ... }` at every caller.
+    try {
+      return await withRetry(run, this.retry);
+    } catch (err) {
+      if (err instanceof LinkgrepError) throw err;
+      throw LinkgrepNetworkError.from(err);
+    }
   }
 }
 

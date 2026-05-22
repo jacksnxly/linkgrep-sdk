@@ -4,7 +4,7 @@ import { AddressInfo } from "node:net";
 import { http, passthrough } from "msw";
 import { server as mswServer } from "./msw-server.js";
 import { HttpClient } from "../http/client.js";
-import { LinkgrepError } from "../http/errors.js";
+import { LinkgrepError, LinkgrepNetworkError } from "../http/errors.js";
 
 // The shared MSW server intercepts every fetch (onUnhandledRequest: "error").
 // This test hits a real localhost server, so register a passthrough for it.
@@ -16,8 +16,13 @@ beforeAll(() => {
 // swallows TimeoutError thrown during the body stream of an error response.
 // The swallowed TimeoutError gets reclassified as a retryable LinkgrepError,
 // which retry.ts then retries — defeating the per-request `timeoutMs` contract.
-describe("HttpClient — body-read TimeoutError propagation (#I1)", () => {
-  it("propagates TimeoutError when body of an error response never finishes", async () => {
+//
+// Subsequently hardened by keryx batch-3 (A1): the throwing path now wraps
+// raw DOMException("TimeoutError"|"AbortError") and other transport failures
+// into LinkgrepNetworkError so consumers writing `catch (e instanceof
+// LinkgrepError)` see a consistent sealed union with `.safe()` callers.
+describe("HttpClient — body-read TimeoutError propagation (#I1, A1)", () => {
+  it("surfaces a body-read timeout as LinkgrepNetworkError(kind=timeout), not raw DOMException", async () => {
     let attempts = 0;
     const server: Server = createServer((_req, res) => {
       attempts++;
@@ -46,11 +51,17 @@ describe("HttpClient — body-read TimeoutError propagation (#I1)", () => {
       }
       const elapsed = Date.now() - start;
 
-      // Correct behavior: exactly one attempt, TimeoutError, elapsed roughly == timeoutMs.
-      // Bug behavior: 3 attempts, elapsed ~= 3 * 1000ms (exp backoff), thrown == InternalServerError.
+      // Correct behavior post-A1: exactly one attempt, thrown is LinkgrepNetworkError
+      // with kind="timeout" (originating DOMException attached as `.cause`),
+      // elapsed roughly == timeoutMs.
+      // Bug behavior pre-A1: thrown was raw DOMException("TimeoutError"), bypassing
+      // the documented LinkgrepError | LinkgrepNetworkError union.
+      // Pre-#I1 bug: 3 attempts, elapsed ~= 3 * 1000ms (exp backoff), thrown == InternalServerError.
       expect(attempts).toBe(1);
-      expect((thrown as Error)?.name).toBe("TimeoutError");
+      expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
+      expect((thrown as LinkgrepNetworkError).kind).toBe("timeout");
       expect(thrown).not.toBeInstanceOf(LinkgrepError);
+      expect(((thrown as LinkgrepNetworkError).cause as Error | undefined)?.name).toBe("TimeoutError");
       expect(elapsed).toBeLessThan(1500);
     } finally {
       server.closeAllConnections?.();
