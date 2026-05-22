@@ -1,6 +1,6 @@
 import { setCookie, getCookieValue } from "./cookie.js";
 
-export interface LinkgrepAnalyticsOptions {
+export interface LinkgrepBrowserAnalyticsOptions {
   /** Override the linkgrep API host (e.g. for first-party proxy). Reserved; not used by init() yet. */
   apiHost?: string;
   /** Cookie Domain attribute for cross-subdomain attribution (e.g. ".example.com"). */
@@ -17,7 +17,7 @@ const DEFAULT_MAX_AGE = 90 * 24 * 60 * 60; // 90 days
 // Limit length to keep attacker-controlled cookie size bounded.
 const CLICK_ID_PATTERN = /^[A-Za-z0-9_-]{1,200}$/;
 
-export function init(opts: LinkgrepAnalyticsOptions = {}): void {
+export function init(opts: LinkgrepBrowserAnalyticsOptions = {}): void {
   if (typeof window === "undefined") return;
   const params = new URLSearchParams(window.location.search);
   const lgId = params.get("lg_id");

@@ -1,4 +1,4 @@
-import { init, getClickId, type LinkgrepAnalyticsOptions } from "./core.js";
+import { init, getClickId, type LinkgrepBrowserAnalyticsOptions } from "./core.js";
 
 declare global {
   interface Window {
@@ -11,7 +11,7 @@ if (typeof window !== "undefined") {
   window.linkgrep = { init, getClickId };
   // Auto-init on script load. Optional config via data-* on the script tag.
   const scriptEl = document.currentScript as HTMLScriptElement | null;
-  const opts: LinkgrepAnalyticsOptions = {};
+  const opts: LinkgrepBrowserAnalyticsOptions = {};
   if (scriptEl?.dataset.apiHost) opts.apiHost = scriptEl.dataset.apiHost;
   if (scriptEl?.dataset.cookieDomain) opts.cookieDomain = scriptEl.dataset.cookieDomain;
   if (scriptEl?.dataset.cookieName) opts.cookieName = scriptEl.dataset.cookieName;

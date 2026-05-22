@@ -2,7 +2,7 @@ import { createAuthMiddleware } from "better-auth/api";
 import type { BetterAuthPlugin } from "better-auth";
 import type { Linkgrep } from "linkgrep";
 
-export interface LinkgrepAnalyticsOptions {
+export interface LinkgrepBetterAuthOptions {
   client: Linkgrep;
   cookieName?: string;
   eventName?: string;
@@ -39,7 +39,7 @@ export function matchesPath(
 }
 
 export function linkgrepAnalytics(
-  opts: LinkgrepAnalyticsOptions,
+  opts: LinkgrepBetterAuthOptions,
 ): BetterAuthPlugin {
   const cookieName = opts.cookieName ?? "lgr_id";
   const eventName = opts.eventName ?? "Sign Up";
