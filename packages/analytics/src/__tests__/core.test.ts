@@ -16,13 +16,13 @@ describe("init()", () => {
 
   it("writes lgr_id cookie when ?lg_id= is present in URL", () => {
     window.location.search = "?lg_id=testclick123";
-    init({ publishableKey: "lg_pk_test" });
+    init();
     expect(getClickId()).toBe("testclick123");
   });
 
   it("does nothing when ?lg_id= is absent", () => {
     window.location.search = "";
-    init({ publishableKey: "lg_pk_test" });
+    init();
     expect(getClickId()).toBeUndefined();
   });
 
@@ -46,7 +46,7 @@ describe("init()", () => {
 
     try {
       window.location.search = "?lg_id=abc";
-      init({ publishableKey: "lg_pk_test", cookieDomain: ".athenum.xyz" });
+      init({ cookieDomain: ".athenum.xyz" });
       expect(writes.some(w => w.includes("Domain=.athenum.xyz"))).toBe(true);
     } finally {
       Object.defineProperty(document, "cookie", original);
@@ -63,14 +63,14 @@ describe("init()", () => {
   // cookie with a truncated value, masking malicious traffic as legitimate.
   it("ignores ?lg_id= values containing characters outside the click-ID alphabet", () => {
     window.location.search = "?lg_id=foo;Max-Age=1";
-    init({ publishableKey: "lg_pk_test" });
+    init();
     expect(getClickId()).toBeUndefined();
   });
 
   it("ignores ?lg_id= values with whitespace, =, or other illegal cookie-octets", () => {
     for (const bad of ["foo bar", "foo=bar", "foo,bar", "foo\"bar", "foo\\bar"]) {
       window.location.search = `?lg_id=${encodeURIComponent(bad)}`;
-      init({ publishableKey: "lg_pk_test" });
+      init();
       expect(getClickId(), `payload: ${JSON.stringify(bad)}`).toBeUndefined();
     }
   });
@@ -78,7 +78,7 @@ describe("init()", () => {
   it("ignores ?lg_id= values longer than 200 characters", () => {
     const bigId = "a".repeat(201);
     window.location.search = `?lg_id=${bigId}`;
-    init({ publishableKey: "lg_pk_test" });
+    init();
     expect(getClickId()).toBeUndefined();
   });
 });

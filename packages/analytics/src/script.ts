@@ -1,14 +1,19 @@
-import { init, getClickId } from "./core.js";
+import { init, getClickId, type LinkgrepAnalyticsOptions } from "./core.js";
 
-// Exposed as window.linkgrep when loaded via CDN script tag
-if (typeof window !== "undefined") {
-  (window as unknown as Record<string, unknown>).linkgrep = { init, getClickId };
-  // Auto-init if data attributes present on the script tag
-  const scriptEl = document.currentScript as HTMLScriptElement | null;
-  if (scriptEl) {
-    const publishableKey = scriptEl.dataset.publishableKey;
-    const apiHost = scriptEl.dataset.apiHost;
-    const cookieDomain = scriptEl.dataset.cookieDomain;
-    if (publishableKey) init({ publishableKey, apiHost, cookieDomain });
+declare global {
+  interface Window {
+    linkgrep?: { init: typeof init; getClickId: typeof getClickId };
   }
+}
+
+// Exposed as window.linkgrep when loaded via CDN script tag.
+if (typeof window !== "undefined") {
+  window.linkgrep = { init, getClickId };
+  // Auto-init on script load. Optional config via data-* on the script tag.
+  const scriptEl = document.currentScript as HTMLScriptElement | null;
+  const opts: LinkgrepAnalyticsOptions = {};
+  if (scriptEl?.dataset.apiHost) opts.apiHost = scriptEl.dataset.apiHost;
+  if (scriptEl?.dataset.cookieDomain) opts.cookieDomain = scriptEl.dataset.cookieDomain;
+  if (scriptEl?.dataset.cookieName) opts.cookieName = scriptEl.dataset.cookieName;
+  init(opts);
 }
