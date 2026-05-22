@@ -149,6 +149,14 @@ jobs:
       # CDN domain and verify (a) it returns 200, (b) the CORS header is
       # set (proves the one-time CORS policy is applied to the bucket),
       # (c) the artifact actually reached the edge.
+      #
+      # Missing CORS is a hard fail: the IIFE itself loads via <script src>
+      # without CORS, but any cross-origin fetch() it issues (telemetry,
+      # batched click submission) needs ACAO. Shipping the artifact with a
+      # broken CORS policy would silently break every consumer integration
+      # — exactly the regression this check exists to catch. Per
+      # docs.github.com/en/actions/reference/workflow-commands-for-github-actions
+      # ::error:: terminates the step.
       - name: Verify CDN serves the uploaded artifact
         run: |
           URL="https://cdn.linkgrep.xyz/script/v${VERSION}/script.js"
@@ -157,15 +165,19 @@ jobs:
             if HDRS=$(curl -fsSI -A "publish-cdn-smoketest" "$URL" 2>&1); then
               echo "$HDRS"
               echo "$HDRS" | grep -i "^access-control-allow-origin: \*" >/dev/null || {
-                echo "::warning::CDN responded but CORS header missing. Apply CORS policy from .github/cdn-cors.json"
-                echo "::warning::via Cloudflare dashboard (R2 → ${R2_BUCKET} → Settings → CORS Policy)."
+                echo "::error::CDN responded but CORS header missing on ${URL}."
+                echo "::error::Apply policy from .github/cdn-cors.json via Cloudflare dashboard"
+                echo "::error::(R2 → ${R2_BUCKET} → Settings → CORS Policy)."
+                exit 1
               }
               echo "::notice::✓ ${URL} (HTTP 200, ${i} attempt$([ $i -eq 1 ] || echo s))"
               exit 0
             fi
-            sleep 5
+            # Skip the trailing sleep on the last iteration — we're about
+            # to bail anyway, no point burning 5 s on a guaranteed-failed run.
+            [ "$i" -lt 6 ] && sleep 5
           done
-          echo "::error::CDN did not serve ${URL} within 30 s. Check R2 bucket binding and cdn.linkgrep.xyz CNAME."
+          echo "::error::CDN did not serve ${URL} within 25 s. Check R2 bucket binding and cdn.linkgrep.xyz CNAME."
           exit 1
 
       - name: Report upload
