@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { Linkgrep, DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
+import { Linkgrep } from "linkgrep";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
 import { env } from "$env/dynamic/private";
 
@@ -47,7 +47,10 @@ function build(): ReturnType<typeof betterAuth> {
     plugins: [
       linkgrepAnalytics({
         client: linkgrep,
-        cookieName: DEFAULT_CLICK_ID_COOKIE,
+        // `cookieName` intentionally omitted — the plugin defaults to
+        // `DEFAULT_CLICK_ID_COOKIE` from the SDK's `protocol.ts`. Passing
+        // it explicitly here would teach the unnecessary import and
+        // override the canonical default if the SDK ever changes it.
         eventName: "Sign Up",
       }),
     ],

@@ -6,7 +6,6 @@ import {
   Linkgrep,
   LinkgrepError,
   LinkgrepNetworkError,
-  DEFAULT_CLICK_ID_COOKIE,
   type RetryOptions,
 } from "linkgrep";
 import { server } from "./msw-server.js";
@@ -36,9 +35,14 @@ function createAuth(overrides?: {
     }),
     emailAndPassword: { enabled: true },
     plugins: [
+      // `cookieName` intentionally omitted (keryx issue #8, 2026-05-23) so
+      // these tests exercise the plugin's default-fallback path. The
+      // plugin defaults to `DEFAULT_CLICK_ID_COOKIE` from the SDK's
+      // `protocol.ts` via `plugin.ts:60` — passing it explicitly here
+      // would re-introduce the pass-through-redundancy the validation
+      // surfaced.
       linkgrepAnalytics({
         client: linkgrep,
-        cookieName: DEFAULT_CLICK_ID_COOKIE,
         eventName: "Sign Up",
         paths: overrides?.paths ?? ["/sign-up/email"],
         onError: overrides?.onError,
