@@ -81,4 +81,36 @@ describe("init()", () => {
     init();
     expect(getClickId()).toBeUndefined();
   });
+
+  // Regression for keryx issue #5: cookie write-amplification.
+  // init() runs on every page load; without a read-first guard, every
+  // navigation with a sticky `?lg_id=` URL re-issues an identical
+  // Set-Cookie even when the cookie already holds the same value.
+  it("writes the cookie exactly once across repeated init() calls with the same lg_id", () => {
+    let proto: object | null = Object.getPrototypeOf(document);
+    let original: PropertyDescriptor | undefined;
+    while (proto) {
+      original = Object.getOwnPropertyDescriptor(proto, "cookie");
+      if (original) break;
+      proto = Object.getPrototypeOf(proto);
+    }
+    if (!original) throw new Error("cookie descriptor not found");
+
+    let writeCount = 0;
+    Object.defineProperty(document, "cookie", {
+      set(v: string) { writeCount++; original!.set?.call(this, v); },
+      get() { return original!.get?.call(this) ?? ""; },
+      configurable: true,
+    });
+
+    try {
+      window.location.search = "?lg_id=testclick123";
+      init();
+      init();
+      init();
+      expect(writeCount, "init() should not re-write an unchanged cookie value").toBe(1);
+    } finally {
+      Object.defineProperty(document, "cookie", original);
+    }
+  });
 });

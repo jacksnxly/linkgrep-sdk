@@ -29,7 +29,13 @@ export function init(opts: LinkgrepBrowserAnalyticsOptions = {}): void {
   const lgId = params.get("lg_id");
   if (!lgId || !CLICK_ID_PATTERN.test(lgId)) return;
 
-  setCookie(opts.cookieName ?? DEFAULT_COOKIE_NAME, lgId, {
+  const cookieName = opts.cookieName ?? DEFAULT_COOKIE_NAME;
+  // Read-first guard: skip the document.cookie write on the hottest browser
+  // path when the cookie already holds the same value. Without this every
+  // pageview with a sticky `?lg_id=` URL re-issues an identical Set-Cookie.
+  if (getCookieValue(cookieName) === lgId) return;
+
+  setCookie(cookieName, lgId, {
     domain: opts.cookieDomain,
     maxAge: DEFAULT_MAX_AGE,
     sameSite: "Lax",
