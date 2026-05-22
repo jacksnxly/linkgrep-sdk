@@ -1,5 +1,7 @@
 import { json, type RequestHandler } from "@sveltejs/kit";
+import { env } from "$env/dynamic/private";
 import { auth } from "$lib/server/auth";
+import { createCheckoutSession } from "$lib/server/stripe";
 
 // Server-side checkout endpoint. The lgCustomerExternalId MUST come from the
 // authenticated session, never from the request body — accepting it from the
@@ -18,8 +20,17 @@ export const POST: RequestHandler = async ({ request }) => {
   }
 
   const lgCustomerExternalId = session.user.id;
-  // Real implementation:
-  //   const stripeSession = await createCheckoutSession(lgCustomerExternalId, body.priceId);
-  //   return json({ url: stripeSession.url });
-  return json({ url: "/success", lgCustomerExternalId });
+
+  // When STRIPE_SECRET_KEY is unset (dev / demo / CI), short-circuit with a
+  // stub URL so the rest of the example app remains runnable without Stripe
+  // credentials. In production deployments, set STRIPE_SECRET_KEY and the
+  // real Checkout Session is created. The lgCustomerExternalId is returned
+  // in both branches so the e2e regression at `attribution.spec.ts` still
+  // verifies the server-derived identifier reaches the response.
+  if (!env.STRIPE_SECRET_KEY) {
+    return json({ url: "/success", lgCustomerExternalId });
+  }
+
+  const stripeSession = await createCheckoutSession(lgCustomerExternalId, body.priceId);
+  return json({ url: stripeSession.url, lgCustomerExternalId });
 };

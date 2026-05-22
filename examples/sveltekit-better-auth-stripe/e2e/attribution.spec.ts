@@ -170,6 +170,23 @@ test.describe("linkgrep attribution flow", () => {
     expect([401, 403], `unauthenticated checkout returned ${res.status()}`).toContain(res.status());
   });
 
+  // Regression for keryx I-9 (validated 2026-05-22T1455Z): the example
+  // app must demonstrate the full attribution loop, including the
+  // Stripe-webhook -> track.sale step. The webhook endpoint must:
+  //   - exist (the entire premise of the example app)
+  //   - reject unsigned requests with a clear 400 (signature verification)
+  //   - not crash when STRIPE_WEBHOOK_SECRET is unset (returns 400, not 500)
+  test("/api/stripe-webhook rejects unsigned POSTs with 400 (#I-9)", async ({ request }) => {
+    const res = await request.post("/api/stripe-webhook", {
+      data: { type: "checkout.session.completed" },
+      headers: { "content-type": "application/json" },
+    });
+    // 400 because the Stripe-Signature header is missing OR because the
+    // STRIPE_WEBHOOK_SECRET is not configured. Either way the endpoint
+    // exists, refuses unsigned events, and does not crash.
+    expect(res.status(), `webhook must exist + refuse unsigned events; got ${res.status()}`).toBe(400);
+  });
+
   test("pricing page POSTs to /create-checkout WITHOUT lgCustomerExternalId in the body", async ({ page }) => {
     // After #I4, the client does NOT send lgCustomerExternalId — the server
     // derives it from the authenticated session. The pricing page just sends
