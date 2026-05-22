@@ -1,13 +1,15 @@
 /**
- * Server-emitted error codes. Listed here as a literal union so consumers
- * writing `if (err.code === "rate_limited")` get a typo warning while the
- * SDK keeps room for forward-compat: the `(string & {})` arm allows any
- * future server-added code without breaking the type, while IntelliSense
- * still suggests the documented values.
+ * Server-emitted error codes. Strict literal union — consumers writing
+ * `switch (err.code) { case "rate_limited": ... }` get full
+ * exhaustiveness checking via the canonical TS `never`-sentinel pattern
+ * (TypeScript handbook → Narrowing → Exhaustiveness checking).
  *
- * Pattern from the TypeScript handbook — "literal types meeting branded
- * primitives" (the `& {}` arm preserves suggestions in editor tooling).
- * Authoritative list mirrors __tests__/errors.test.ts case rows.
+ * Server-emitted codes outside this list become `"unknown"` at the
+ * `parseErrorResponse` seam (errors.ts:209-211 logic), preserving the
+ * raw envelope on `.raw` so consumers can still introspect. This trades
+ * the previous `(string & {})` forward-compat arm — which silently
+ * widened to `string` and defeated exhaustiveness — for an explicit
+ * "unknown" funnel that consumers can branch on.
  */
 export type LinkgrepErrorCode =
   | "bad_request"
@@ -19,9 +21,20 @@ export type LinkgrepErrorCode =
   | "unprocessable"
   | "rate_limited"
   | "internal_error"
-  | "unknown"
-  // eslint-disable-next-line @typescript-eslint/ban-types
-  | (string & {});
+  | "unknown";
+
+const KNOWN_ERROR_CODES: ReadonlySet<LinkgrepErrorCode> = new Set([
+  "bad_request",
+  "unauthorized",
+  "permission_denied",
+  "not_found",
+  "conflict",
+  "gone",
+  "unprocessable",
+  "rate_limited",
+  "internal_error",
+  "unknown",
+]);
 
 export interface LinkgrepErrorInit {
   status: number;
@@ -131,9 +144,31 @@ export class InternalServerError extends LinkgrepError {
  * Tagged kinds for transport-layer failures. Listed in a `const` tuple so the
  * exhaustiveness check inside `LinkgrepNetworkError.from()` blocks a new kind
  * being added without a matching `classify()` branch.
+ *
+ * - `timeout` / `abort` — caller cancellation (terminal: retrying defeats intent).
+ * - `oversize` — response body exceeded the cap (terminal: hostile/MITM
+ *   origin will keep returning oversized payloads; retrying amplifies load).
+ * - `network` — DNS / connection-reset / TLS / mid-stream transport failure
+ *   (transient: safe to retry once or twice).
  */
-const NETWORK_ERROR_KINDS = ["timeout", "abort", "network"] as const;
+const NETWORK_ERROR_KINDS = ["timeout", "abort", "oversize", "network"] as const;
 export type LinkgrepNetworkErrorKind = (typeof NETWORK_ERROR_KINDS)[number];
+
+/**
+ * Terminal transport-failure predicate. Centralized so the three call sites
+ * (retry.ts, the body-reader catch in client.ts, and classify() below)
+ * share one definition — adding a terminal kind only needs editing this
+ * function and the kind union.
+ */
+export function isTerminalTransportError(err: unknown): boolean {
+  if (err instanceof LinkgrepNetworkError) {
+    return err.kind === "timeout" || err.kind === "abort" || err.kind === "oversize";
+  }
+  if (err instanceof Error) {
+    return err.name === "TimeoutError" || err.name === "AbortError";
+  }
+  return false;
+}
 
 export class LinkgrepNetworkError extends Error {
   readonly kind: LinkgrepNetworkErrorKind;
@@ -178,12 +213,14 @@ export class LinkgrepNetworkError extends Error {
 // the `_exhaustive: never` assignment below fails to compile. Canonical
 // pattern from the TypeScript handbook (Narrowing → Exhaustiveness checking).
 {
-  const _exhaustiveOnKind = (k: LinkgrepNetworkErrorKind): "timeout" | "abort" | "network" => {
+  const _exhaustiveOnKind = (k: LinkgrepNetworkErrorKind): "timeout" | "abort" | "oversize" | "network" => {
     switch (k) {
       case "timeout":
         return "timeout";
       case "abort":
         return "abort";
+      case "oversize":
+        return "oversize";
       case "network":
         return "network";
       default: {
@@ -226,9 +263,18 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
   }
   // Unknown shape → keep defaults (code: "unknown", message: statusText). Raw preserved below.
 
+  // Funnel: server-emitted codes outside the documented union land at
+  // `"unknown"` so consumers writing exhaustive switches over
+  // `LinkgrepErrorCode` get a single fallthrough branch ("unknown") rather
+  // than an open `string` arm that defeats exhaustiveness. The raw envelope
+  // is still preserved on `.raw` for introspection.
+  const narrowedCode: LinkgrepErrorCode = KNOWN_ERROR_CODES.has(code as LinkgrepErrorCode)
+    ? (code as LinkgrepErrorCode)
+    : "unknown";
+
   const init: LinkgrepErrorInit = {
     status: res.status,
-    code,
+    code: narrowedCode,
     message,
     docUrl,
     requestId: res.headers.get("x-request-id") ?? undefined,
@@ -264,15 +310,27 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
 }
 
 /**
- * Parse a Retry-After header value (delta-seconds OR HTTP-date) into a number
- * of seconds from now. Returns undefined for missing / malformed values.
+ * Parse a Retry-After header value into a number of seconds from now.
+ * Returns undefined for missing / malformed values.
  *
- * Per RFC 9110 §10.2.3: `delay-seconds = 1*DIGIT` — non-negative base-10
- * integer. We anchor the seconds branch on /^\d+$/ instead of Number() to
- * reject negatives, decimals, hex literals (`0x10`), scientific notation
- * (`1e3`), and whitespace-only strings (which `Number()` coerces to 0).
- * https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
+ * Accepts three shapes:
+ *   1. `delay-seconds` (RFC 9110 §10.2.3) — `1*DIGIT`, non-negative base-10
+ *      integer. Anchored on /^\d+$/ to reject negatives, decimals, hex
+ *      literals (`0x10`), scientific notation (`1e3`), and whitespace-only
+ *      strings (which `Number()` coerces to 0).
+ *   2. HTTP-date (RFC 9110 §5.6.7) — IMF-fixdate / rfc850 / asctime, all of
+ *      which contain literal whitespace between parts. Whitespace presence
+ *      gates the Date.parse branch.
+ *   3. ISO-8601 / RFC 3339 (e.g. `2026-12-31T00:00:00Z`) — emitted by
+ *      strict modern servers. Detected via the leading `YYYY-MM-DD` anchor
+ *      so V8's permissive `Date.parse("-5") → year 2001` foot-gun cannot
+ *      slip through the bare-numeric branch.
+ *
+ * Refs:
+ *   https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
+ *   https://datatracker.ietf.org/doc/html/rfc3339
  */
+const ISO_DATE_ANCHOR = /^\d{4}-\d{2}-\d{2}[T\s]/;
 function parseRetryAfter(raw: string | null): number | undefined {
   if (!raw) return undefined;
   const trimmed = raw.trim();
@@ -280,11 +338,12 @@ function parseRetryAfter(raw: string | null): number | undefined {
     const n = Number(trimmed);
     if (Number.isSafeInteger(n)) return n;
   }
-  // HTTP-date per RFC 9110 §5.6.7 always contains whitespace between parts
-  // (e.g. "Sun, 06 Nov 1994 08:49:37 GMT"). Requiring whitespace here rejects
-  // numeric-looking strings ("-5", "+12") that V8's Date.parse permissively
-  // interprets as years (e.g. Date.parse("-5") → year 2001 epoch ms).
-  if (!/\s/.test(trimmed)) return undefined;
+  // HTTP-date OR ISO-8601 path: either contains whitespace (IMF-fixdate /
+  // rfc850 / asctime — RFC 9110 §5.6.7) or matches the ISO-8601 leading
+  // `YYYY-MM-DD[T|space]` anchor. Both gate Date.parse() against V8's
+  // over-permissive year-only interpretation of bare signed integers
+  // (e.g. `Date.parse("-5")` → year 2001 epoch ms).
+  if (!/\s/.test(trimmed) && !ISO_DATE_ANCHOR.test(trimmed)) return undefined;
   const asDate = Date.parse(trimmed);
   if (Number.isFinite(asDate)) return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
   return undefined;

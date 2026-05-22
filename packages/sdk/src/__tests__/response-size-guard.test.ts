@@ -36,7 +36,7 @@ describe("HttpClient — response-size guard (P4)", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
-    expect((thrown as LinkgrepNetworkError).kind).toBe("network");
+    expect((thrown as LinkgrepNetworkError).kind).toBe("oversize");
     expect((thrown as LinkgrepNetworkError).message).toMatch(/response too large/i);
   });
 
@@ -66,7 +66,7 @@ describe("HttpClient — response-size guard (P4)", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
-    expect((thrown as LinkgrepNetworkError).kind).toBe("network");
+    expect((thrown as LinkgrepNetworkError).kind).toBe("oversize");
   });
 
   it("accepts responses without Content-Length (small body, no cap risk)", async () => {
@@ -131,7 +131,7 @@ describe("readJsonWithByteCap — streaming guard (keryx P4b)", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
-    expect((thrown as LinkgrepNetworkError).kind).toBe("network");
+    expect((thrown as LinkgrepNetworkError).kind).toBe("oversize");
     expect((thrown as LinkgrepNetworkError).message).toMatch(/response too large/i);
   });
 

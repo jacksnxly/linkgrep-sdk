@@ -1,4 +1,4 @@
-import { LinkgrepError, LinkgrepNetworkError, parseErrorResponse } from "./errors.js";
+import { LinkgrepError, LinkgrepNetworkError, isTerminalTransportError, parseErrorResponse } from "./errors.js";
 import { withRetry, type RetryOptions } from "./retry.js";
 
 export interface HttpClientOptions {
@@ -44,7 +44,7 @@ export async function readJsonWithByteCap(res: Response, capBytes: number): Prom
       if (total > capBytes) {
         await reader.cancel();
         throw new LinkgrepNetworkError(
-          "network",
+          "oversize",
           `response too large: >${capBytes} bytes (cap ${capBytes})`,
         );
       }
@@ -56,10 +56,13 @@ export async function readJsonWithByteCap(res: Response, capBytes: number): Prom
     // so a timer that fires mid-body-read makes read() reject with
     // TimeoutError — that must propagate so retry.ts can treat it as
     // terminal, not get reclassified as a retryable 5xx.
-    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) throw e;
-    // JSON-shaped fetch failure (network reset mid-stream, etc.). Match the
-    // pre-fix behavior of res.json().catch(() => null) on the error path.
-    return null;
+    if (isTerminalTransportError(e)) throw e;
+    // Mid-stream transport failure (network reset, premature close, undici
+    // "terminated"). Surface as a tagged LinkgrepNetworkError so the
+    // documented `LinkgrepError | LinkgrepNetworkError` union holds — pre-fix,
+    // we returned `null` here which then cascaded as `null as T` on the
+    // success path and crashed consumer narrowing (`"duplicate" in null`).
+    throw LinkgrepNetworkError.from(e);
   }
   if (chunks.length === 0) return null;
   const buf = new Uint8Array(total);
@@ -72,8 +75,11 @@ export async function readJsonWithByteCap(res: Response, capBytes: number): Prom
   if (text.length === 0) return null;
   try {
     return JSON.parse(text);
-  } catch {
-    return null;
+  } catch (e) {
+    // Non-JSON 200 body — surface as a network error rather than null. A
+    // server returning malformed JSON is a real, observable defect; null
+    // would silently cascade through `parsed as T` as if it succeeded.
+    throw new LinkgrepNetworkError("network", `non-JSON response body: ${e instanceof Error ? e.message : String(e)}`, e);
   }
 }
 
@@ -101,7 +107,21 @@ export class HttpClient {
    * shape on conflict.
    */
   async post<T>(path: string, body: unknown): Promise<T> {
-    const run = async (): Promise<T> => {
+    const run = async (perAttemptBudgetSignal?: AbortSignal): Promise<T> => {
+      // Per-attempt timeout. When `retry.totalBudgetMs` is set, withRetry
+      // hands us an additional signal that fires when the remaining budget
+      // expires — composed via AbortSignal.any so whichever fires first
+      // wins. Node 18.17+/20.3+ ship AbortSignal.any (MDN); the SDK's
+      // engines floor is `>=18`, so consumers on 18.0–18.16 lose the budget
+      // narrowing but still get the per-attempt timeout — a strict
+      // improvement over the pre-fix behavior where neither was bounded
+      // per-attempt by the budget.
+      const perAttemptTimeout = AbortSignal.timeout(this.timeoutMs);
+      const signal =
+        perAttemptBudgetSignal !== undefined && typeof AbortSignal.any === "function"
+          ? AbortSignal.any([perAttemptTimeout, perAttemptBudgetSignal])
+          : perAttemptTimeout;
+
       const res = await fetch(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: {
@@ -109,9 +129,7 @@ export class HttpClient {
           Authorization: `Bearer ${this.token}`,
         },
         body: JSON.stringify(body),
-        // AbortSignal.timeout throws DOMException("...", "TimeoutError") on fire
-        // (MDN). retry.ts treats both Abort/Timeout as terminal.
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
 
       // Pre-flight response-size check: refuse to parse oversized bodies into
@@ -130,7 +148,7 @@ export class HttpClient {
         const len = Number.parseInt(declared, 10);
         if (Number.isFinite(len) && len > DEFAULT_MAX_RESPONSE_BYTES) {
           throw new LinkgrepNetworkError(
-            "network",
+            "oversize",
             `response too large: ${len} bytes (cap ${DEFAULT_MAX_RESPONSE_BYTES})`,
           );
         }
@@ -142,6 +160,19 @@ export class HttpClient {
         throw parseErrorResponse(res, parsed);
       }
 
+      // Empty 200 / null-parsed-success is treated as a transport failure
+      // rather than `null as T`. Track endpoints are documented to return a
+      // JSON envelope on success; a missing body indicates the upstream cut
+      // off mid-response or never wrote one. Pre-fix, `null as T` cascaded
+      // into the documented `"duplicate" in result` consumer narrowing
+      // pattern with `TypeError: Cannot use 'in' operator in null`.
+      if (parsed === null) {
+        throw new LinkgrepNetworkError(
+          "network",
+          "empty response body on 2xx — upstream returned no payload",
+        );
+      }
+
       return parsed as T;
     };
 
@@ -150,10 +181,14 @@ export class HttpClient {
     // Without this seam, raw DOMException("TimeoutError"|"AbortError") and
     // TypeError("fetch failed") leak past the documented union — defeating
     // `try { ... } catch (e instanceof LinkgrepError) { ... }` at every caller.
+    // `LinkgrepNetworkError` instances are passed through unchanged so the
+    // semantic `kind` (e.g. "oversize") survives — re-wrapping via .from()
+    // would collapse every kind back to "network" via classify().
     try {
       return await withRetry(run, this.retry);
     } catch (err) {
       if (err instanceof LinkgrepError) throw err;
+      if (err instanceof LinkgrepNetworkError) throw err;
       throw LinkgrepNetworkError.from(err);
     }
   }
