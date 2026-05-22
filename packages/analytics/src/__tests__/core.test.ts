@@ -56,4 +56,29 @@ describe("init()", () => {
   it("getClickId returns undefined when no cookie set", () => {
     expect(getClickId()).toBeUndefined();
   });
+
+  // Regression for keryx issue #4: cookie-attribute injection via ?lg_id=
+  // Attacker-controlled URL `?lg_id=foo;Max-Age=1` should NOT set the cookie at
+  // all (input is not a valid click ID). Pre-fix, the SDK would still write the
+  // cookie with a truncated value, masking malicious traffic as legitimate.
+  it("ignores ?lg_id= values containing characters outside the click-ID alphabet", () => {
+    window.location.search = "?lg_id=foo;Max-Age=1";
+    init({ publishableKey: "lg_pk_test" });
+    expect(getClickId()).toBeUndefined();
+  });
+
+  it("ignores ?lg_id= values with whitespace, =, or other illegal cookie-octets", () => {
+    for (const bad of ["foo bar", "foo=bar", "foo,bar", "foo\"bar", "foo\\bar"]) {
+      window.location.search = `?lg_id=${encodeURIComponent(bad)}`;
+      init({ publishableKey: "lg_pk_test" });
+      expect(getClickId(), `payload: ${JSON.stringify(bad)}`).toBeUndefined();
+    }
+  });
+
+  it("ignores ?lg_id= values longer than 200 characters", () => {
+    const bigId = "a".repeat(201);
+    window.location.search = `?lg_id=${bigId}`;
+    init({ publishableKey: "lg_pk_test" });
+    expect(getClickId()).toBeUndefined();
+  });
 });
