@@ -1,14 +1,16 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
-import { setupServer } from "msw/node";
+import { server } from "./msw-server.js";
 import { parseErrorResponse, RateLimitError } from "../http/errors.js";
 import { withRetry } from "../http/retry.js";
 
+// vitest.config.ts:8-12 documents that all SDK test files share a single
+// MSW setupServer instance (msw-server.ts), with lifecycle hooks owned by
+// setup.ts. Spinning up a second setupServer here would stack interceptors
+// and silently bypass the global `onUnhandledRequest: "error"` safety net.
+// MSW docs (https://mswjs.io/docs/integrations/node) recommend exactly this
+// shared-instance pattern.
 const BASE = "http://api.linkgrep.test";
-const server = setupServer();
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
 
 // Regression for keryx #I3a: Retry-After in HTTP-date format must be parsed,
 // not silently dropped. Per RFC 9110 §10.2.3:  Retry-After = HTTP-date / delay-seconds
