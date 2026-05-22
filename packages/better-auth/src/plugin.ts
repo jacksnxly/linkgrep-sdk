@@ -1,12 +1,28 @@
 import { createAuthMiddleware } from "better-auth/api";
 import type { BetterAuthPlugin } from "better-auth";
-import { type Linkgrep, DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
+import {
+  type Linkgrep,
+  type LinkgrepError,
+  type LinkgrepNetworkError,
+  LinkgrepError as LinkgrepErrorClass,
+  DEFAULT_CLICK_ID_COOKIE,
+} from "linkgrep";
 
 export interface LinkgrepBetterAuthOptions {
   client: Linkgrep;
   cookieName?: string;
   eventName?: string;
   paths?: string[];
+  /**
+   * Optional structured-error hook fired when a background `track.lead` call
+   * fails. The full `LinkgrepError` (with `.code`, `.status`, `.requestId`,
+   * `.docUrl`) or `LinkgrepNetworkError` (with `.kind`) is passed through so
+   * the host application's observability layer (Sentry, Datadog, Honeycomb)
+   * can record the full diagnostic. When omitted, the plugin falls back to a
+   * structured `console.warn` line that still preserves code / status /
+   * requestId / docUrl / kind (keryx I-10).
+   */
+  onError?: (error: LinkgrepError | LinkgrepNetworkError) => void;
 }
 
 // Each entry is either an exact path or a path PREFIX ending with "/".
@@ -88,13 +104,27 @@ export function linkgrepAnalytics(
                 })
                 .then((result) => {
                   if (!result.ok) {
-                    const msg =
-                      result.error instanceof Error
-                        ? result.error.message
-                        : "unknown";
-                    console.warn(
-                      `[linkgrep] track.lead failed (${msg})`,
-                    );
+                    // Pre-fix (keryx I-10), only `error.message` survived the
+                    // log line. The SDK invested in a rich error shape
+                    // (`code`, `status`, `requestId`, `docUrl` for
+                    // LinkgrepError; `kind` for LinkgrepNetworkError); the
+                    // plugin now either delegates the full event to a host
+                    // `onError` callback (Sentry / Datadog / Honeycomb) or
+                    // emits a structured console line that preserves the
+                    // operational fields.
+                    if (opts.onError) {
+                      opts.onError(result.error);
+                      return;
+                    }
+                    if (result.error instanceof LinkgrepErrorClass) {
+                      console.warn(
+                        `[linkgrep] track.lead failed: code=${result.error.code} status=${result.error.status} requestId=${result.error.requestId ?? "-"} docUrl=${result.error.docUrl ?? "-"} message=${result.error.message}`,
+                      );
+                    } else {
+                      console.warn(
+                        `[linkgrep] track.lead transport failure: kind=${result.error.kind} message=${result.error.message}`,
+                      );
+                    }
                   }
                 }),
             );
