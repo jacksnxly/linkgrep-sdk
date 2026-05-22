@@ -28,10 +28,22 @@ function filterCookieHeader(raw: string | null): string | null {
   return kept.length > 0 ? kept.join("; ") : null;
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
-  if (!event.url.pathname.startsWith("/lgr")) return resolve(event);
+// `/lgr` is the proxy mount point. We require an actual path boundary so that
+// `/lgr@attacker.com/x` (userinfo abuse) and `/lgr-evil.com/y` (host-suffix
+// abuse) do NOT match — both would otherwise let an attacker steer the
+// outbound `fetch` to an arbitrary host via the WHATWG URL authority grammar.
+// See https://url.spec.whatwg.org/#authority-state.
+const PROXY_PREFIX = "/lgr";
 
-  const path = event.url.pathname.replace("/lgr", "");
+export const handle: Handle = async ({ event, resolve }) => {
+  const { pathname } = event.url;
+  if (pathname !== PROXY_PREFIX && !pathname.startsWith(`${PROXY_PREFIX}/`)) {
+    return resolve(event);
+  }
+
+  // Slice by length instead of `replace(...)`; replace is unanchored and would
+  // strip a `/lgr` occurrence elsewhere in the path.
+  const path = pathname.slice(PROXY_PREFIX.length);
   const isAsset = path.startsWith("/script");
   const target = isAsset
     ? `https://cdn.linkgrep.app${path}`
