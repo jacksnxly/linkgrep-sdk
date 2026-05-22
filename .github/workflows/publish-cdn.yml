@@ -23,6 +23,14 @@ name: Publish CDN
 # Served via cdn.linkgrep.xyz (R2 custom domain — bucket binding configured
 # in the Cloudflare dashboard; DNS CNAME from cdn.linkgrep.xyz to the
 # bucket's public R2 endpoint).
+#
+# CORS policy lives in `.github/cdn-cors.json` (Access-Control-Allow-Origin: *
+# + GET/HEAD — matches Stripe.js / Segment / Plausible / jsDelivr empirically).
+# Apply once after bucket creation (idempotent — re-run is safe):
+#
+#   CLOUDFLARE_API_TOKEN=...  CLOUDFLARE_ACCOUNT_ID=...  \
+#     npx wrangler r2 bucket cors set linkgrep-cdn \
+#       --file .github/cdn-cors.json
 on:
   workflow_dispatch:
     inputs:
