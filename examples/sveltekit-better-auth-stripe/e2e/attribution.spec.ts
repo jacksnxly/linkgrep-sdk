@@ -187,6 +187,41 @@ test.describe("linkgrep attribution flow", () => {
     expect(res.status(), `webhook must exist + refuse unsigned events; got ${res.status()}`).toBe(400);
   });
 
+  // Regression for keryx issue #1 (validated 2026-05-23): per Stripe's
+  // official guidance (https://docs.stripe.com/webhooks — "Quickly return
+  // a 2xx response ... prior to any complex logic that might cause a
+  // timeout"), the handler MUST NOT `await` `track.sale.safe(...)`
+  // before the 200 ack. Awaiting under default SDK retry knobs
+  // (maxAttempts=3 × timeoutMs=10_000 + backoffs ≈ 33 s under
+  // degraded-but-not-dead upstream) would exceed Stripe's documented
+  // delivery timeout and trap Stripe in a retry storm against the
+  // already-failing linkgrep API.
+  //
+  // File-truth structural check (the actual end-to-end timing path
+  // requires STRIPE_WEBHOOK_SECRET + a forged signature + a slow MSW
+  // fixture; not available in the public OSS example). If the example
+  // ever regresses to `await ...track.sale.safe`, this assertion fires.
+  test("stripe-webhook handler dispatches track.sale WITHOUT awaiting it (#issue-1)", async () => {
+    const fs = await import("node:fs/promises");
+    const url = await import("node:url");
+    const { fileURLToPath } = url;
+    const here = fileURLToPath(new URL(".", import.meta.url));
+    const filePath = `${here}../src/routes/api/stripe-webhook/+server.ts`;
+    const src = await fs.readFile(filePath, "utf8");
+    // The await pattern under test:
+    //   const r = await getLinkgrep().track.sale.safe({ ... });
+    // Pattern-matches any of `await getLinkgrep().track.sale` or
+    // `await ...track.sale.safe` in the handler body — robust against
+    // formatting (line breaks, intermediate vars).
+    const offendingPattern = /\bawait\s+[^;]*track\.sale\.safe\s*\(/;
+    expect(
+      offendingPattern.test(src),
+      "stripe-webhook handler must not await track.sale.safe — dispatch must be fire-and-forget so the 200 ack stays inside Stripe's delivery window. See https://docs.stripe.com/webhooks.",
+    ).toBe(false);
+    // Belt-and-braces: confirm the fire-and-forget shape IS present.
+    expect(src, "the handler must invoke track.sale.safe via the void/.then dispatch pattern").toMatch(/\bvoid\s+getLinkgrep\(\)/);
+  });
+
   test("pricing page POSTs to /create-checkout WITHOUT lgCustomerExternalId in the body", async ({ page }) => {
     // After #I4, the client does NOT send lgCustomerExternalId — the server
     // derives it from the authenticated session. The pricing page just sends

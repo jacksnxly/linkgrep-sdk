@@ -64,31 +64,56 @@ export const POST: RequestHandler = async ({ request }) => {
     // stable idempotency key — track.sale uses `invoiceId` as its Redis-NX
     // dedup key, so passing `session.id` here ensures retries of this
     // webhook don't double-record the sale.
+    //
+    // Fire-and-forget dispatch (keryx issue #1, 2026-05-23). Stripe's
+    // webhook delivery client times out short of our worst-case retry
+    // budget (defaults: maxAttempts=3 × timeoutMs=10_000 + backoffs ≈
+    // 33 s under degraded-but-not-dead upstream). Awaiting track.sale
+    // before the 200 ack would invite redelivery storms. Per Stripe's
+    // official guidance (https://docs.stripe.com/webhooks —
+    // "Quickly return a 2xx response ... prior to any complex logic
+    // that might cause a timeout"), we ack first and dispatch the
+    // attribution call as a background task.
+    //
+    // This mirrors `@linkgrep/better-auth`'s own `runInBackground`
+    // shape (packages/better-auth/src/plugin.ts:96) so the example
+    // demonstrates one consistent ack-first idiom across the codebase.
+    // On Node hosts the dispatched promise keeps the event loop alive
+    // until it settles; on adapter-cloudflare-workers consumers should
+    // wrap this in `event.platform?.ctx?.waitUntil(...)` to survive
+    // the response-close boundary.
     if (lgCustomerExternalId && typeof session.amount_total === "number") {
-      const r = await getLinkgrep().track.sale.safe({
-        invoiceId: session.id,
-        customerExternalId: lgCustomerExternalId,
-        amount: session.amount_total,
-        currency: session.currency ?? undefined,
-      });
-      if (!r.ok) {
-        // Stripe will retry on non-2xx — return 200 here even on linkgrep
-        // failure so we don't trap Stripe in an infinite retry loop over a
-        // downstream attribution outage. The structured log line preserves
-        // the operational fields (mirror of the better-auth plugin shape).
-        if (r.error instanceof LinkgrepError) {
-          console.warn(
-            `[linkgrep] track.sale failed: code=${r.error.code} status=${r.error.status} requestId=${r.error.requestId ?? "-"} message=${r.error.message}`,
-          );
-        } else {
-          console.warn(
-            `[linkgrep] track.sale transport failure: kind=${r.error.kind} message=${r.error.message}`,
-          );
-        }
-      }
+      void getLinkgrep()
+        .track.sale.safe({
+          invoiceId: session.id,
+          customerExternalId: lgCustomerExternalId,
+          amount: session.amount_total,
+          currency: session.currency ?? undefined,
+        })
+        .then((r) => {
+          if (!r.ok) {
+            if (r.error instanceof LinkgrepError) {
+              console.warn(
+                `[linkgrep] track.sale failed: code=${r.error.code} status=${r.error.status} requestId=${r.error.requestId ?? "-"} message=${r.error.message}`,
+              );
+            } else {
+              console.warn(
+                `[linkgrep] track.sale transport failure: kind=${r.error.kind} message=${r.error.message}`,
+              );
+            }
+          }
+        })
+        .catch((e) => {
+          // Defensive — .safe() is documented to never throw, but guard
+          // against unhandled-rejection-crashes-the-process if that
+          // contract is ever broken.
+          const message = e instanceof Error ? e.message : String(e);
+          console.warn(`[linkgrep] track.sale unexpected error: ${message}`);
+        });
     }
   }
 
-  // ack — Stripe stops retrying on any 2xx
+  // ack — Stripe stops retrying on any 2xx. The dispatched track.sale
+  // call continues in the background regardless of this response.
   return new Response(null, { status: 200 });
 };
