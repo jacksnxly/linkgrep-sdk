@@ -166,22 +166,19 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
 // Our Retry-After honoring path must apply jitter to the sleep, not synchronize
 // every client on the exact server-suggested instant.
 describe("withRetry — jitter on Retry-After floor (#I3c)", () => {
-  // Pragmatic exception to keryx C11 (canonical fake-timer pattern is
-  // preferred over setTimeout-spy): this test measures the EXACT sleep
-  // duration across multiple runs to prove variance. A purely behavioral
-  // assertion (advance by N ms; assert call count) cannot distinguish
-  // "varying sleep duration" from "deterministic sleep duration ≤ N",
-  // because both produce the same call count after the advancement. The
-  // spy is the minimal pattern that records sleep ms per run.
+  // Observation seam: `RetryOptions.onSleep` (retry.ts:54-55) is the
+  // documented @internal hook for test observation of per-attempt sleep
+  // values. It fires post-clamp, post-budget-gate — with the same ms the
+  // runtime would pass to setTimeout. Migrating off the prior
+  // `vi.spyOn(globalThis, "setTimeout")` pattern (keryx issue #5,
+  // 2026-05-23) makes this test resilient to scheduler refactors:
+  // if retry.ts ever switched to `scheduler.wait` / `setImmediate` /
+  // `queueMicrotask` for backoff, a global-setTimeout spy would silently
+  // record zero calls while onSleep keeps reporting actual sleep ms.
   it("introduces variance across runs when sleeping the Retry-After floor", async () => {
     vi.useFakeTimers();
     try {
-      const originalSetTimeout = globalThis.setTimeout;
       const recordedSleeps: number[] = [];
-      vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: () => void, ms: number) => {
-        recordedSleeps.push(ms);
-        return originalSetTimeout(cb, 0) as ReturnType<typeof setTimeout>;
-      }) as typeof globalThis.setTimeout);
 
       const measure = async (): Promise<number> => {
         const before = recordedSleeps.length;
@@ -200,7 +197,10 @@ describe("withRetry — jitter on Retry-After floor (#I3c)", () => {
           }
           return "ok";
         });
-        const p = withRetry(fn, 3);
+        const p = withRetry(fn, {
+          maxAttempts: 3,
+          onSleep: (ms) => recordedSleeps.push(ms),
+        });
         await vi.runAllTimersAsync();
         await p;
         return recordedSleeps[before];
