@@ -45,6 +45,59 @@ test.describe("linkgrep attribution flow", () => {
     expect(page.url()).toMatch(/\/$/);
   });
 
+  // Regression for keryx Critical C-3 (validated 2026-05-22T1455Z): the
+  // /lgr proxy MUST cut off a slowloris client that drips bytes slowly. The
+  // body-buffering step must run UNDER the same UPSTREAM_TIMEOUT_MS window
+  // as the upstream fetch; pre-fix, the AbortController + timer were
+  // wired AFTER readBodyWithCap returned, so a chunked client trickling 1
+  // byte every N ms held a SvelteKit server slot until the platform's idle
+  // timeout (tens of seconds to minutes). Acceptance: server cuts off the
+  // connection (504 or ECONNRESET) within ~UPSTREAM_TIMEOUT_MS + slack.
+  test("cuts off slowloris chunked body upload to /lgr within upstream-timeout window (C-3)", async () => {
+    const http = await import("node:http");
+    const DRIP_INTERVAL_MS = 1500;
+    const HARD_DEADLINE_MS = 15_000; // upstream timeout is 10s; this is comfortable headroom
+    const start = Date.now();
+    const result: { kind: string; cutoffMs: number; status?: number; code?: string } = await new Promise((resolve) => {
+      const req = http.request({
+        hostname: "localhost",
+        port: 5173,
+        method: "POST",
+        path: "/lgr/api/track/lead",
+        headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+      });
+      let settled = false;
+      const settle = (r: { kind: string; cutoffMs: number; status?: number; code?: string }) => {
+        if (!settled) { settled = true; resolve(r); }
+      };
+      req.on("response", (res) => {
+        res.on("data", () => { /* drain */ });
+        res.on("end", () => settle({ kind: "response", cutoffMs: Date.now() - start, status: res.statusCode }));
+      });
+      req.on("error", (e: NodeJS.ErrnoException) => settle({ kind: "socket-error", cutoffMs: Date.now() - start, code: e.code }));
+      // Drip 1 byte every DRIP_INTERVAL_MS. With UPSTREAM_TIMEOUT_MS=10s
+      // the server should cut us off around the 10s mark.
+      const dripper = setInterval(() => {
+        try { req.write("x"); } catch { clearInterval(dripper); }
+      }, DRIP_INTERVAL_MS);
+      const hardKill = setTimeout(() => {
+        clearInterval(dripper);
+        settle({ kind: "hard-deadline", cutoffMs: HARD_DEADLINE_MS });
+        try { req.destroy(); } catch { /* */ }
+      }, HARD_DEADLINE_MS);
+      req.on("close", () => {
+        clearInterval(dripper);
+        clearTimeout(hardKill);
+      });
+    });
+
+    const cutOffInTime =
+      (result.kind === "response" && (result.status === 504 || result.status === 413)) ||
+      (result.kind === "socket-error" && (result.code === "ECONNRESET" || result.code === "EPIPE"));
+    expect(cutOffInTime, `proxy must cut off slowloris within ~UPSTREAM_TIMEOUT_MS (got ${JSON.stringify(result)})`).toBe(true);
+    expect(result.cutoffMs, `cut-off must happen well before hard deadline ${HARD_DEADLINE_MS}ms; got ${result.cutoffMs}ms`).toBeLessThan(HARD_DEADLINE_MS - 500);
+  });
+
   // Regression for keryx Important #2 (validated 2026-05-22): /lgr's 64 KiB
   // request-body cap MUST hold even when the client uses Transfer-Encoding:
   // chunked (no Content-Length). Pre-fix, the cap was a Content-Length

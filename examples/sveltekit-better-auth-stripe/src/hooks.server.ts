@@ -66,16 +66,30 @@ const MAX_PROXY_BODY_BYTES = 64 * 1024;
  * bound a track-payload (<2 KiB in practice), buffering is the correct
  * shape: cap fires before fetch is called, period.
  *
+ * The `abortSignal` parameter is the proxy's master timeout/cancellation
+ * signal (set up BEFORE this function is called so the same timer governs
+ * both body-buffer and upstream-fetch phases). A slowloris client dripping
+ * bytes never reaches the cap; without this signal, the body-read await
+ * would hang until the platform's idle timeout, leaking a server slot
+ * (keryx C-3, 2026-05-22T1455Z).
+ *
  * Pattern: WHATWG-canonical Reader + byte counter from
  * https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams
  */
 async function readBodyWithCap(
   src: ReadableStream<Uint8Array>,
   cap: number,
-): Promise<{ body: Uint8Array | null; tooLarge: boolean }> {
+  abortSignal: AbortSignal,
+): Promise<{ body: Uint8Array | null; tooLarge: boolean; aborted: boolean }> {
+  if (abortSignal.aborted) return { body: null, tooLarge: false, aborted: true };
   const reader = src.getReader();
   let total = 0;
   const chunks: Uint8Array[] = [];
+  // Wire the abort signal into the reader so a slow-body trickle gets the
+  // same UPSTREAM_TIMEOUT_MS budget as the upstream fetch. reader.cancel()
+  // releases the underlying connection per WHATWG Streams.
+  const onAbort = () => { void reader.cancel(); };
+  abortSignal.addEventListener("abort", onAbort, { once: true });
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -84,16 +98,26 @@ async function readBodyWithCap(
       total += value.length;
       if (total > cap) {
         await reader.cancel();
-        return { body: null, tooLarge: true };
+        return { body: null, tooLarge: true, aborted: false };
       }
       chunks.push(value);
     }
-  } finally { reader.releaseLock(); }
-  if (chunks.length === 0) return { body: null, tooLarge: false };
+  } catch {
+    // A reader.cancel() race + abort propagation can cause read() to reject
+    // with a synthetic error; treat any rejection that lands while the
+    // signal is aborted as a deliberate abort.
+    if (abortSignal.aborted) return { body: null, tooLarge: false, aborted: true };
+    throw new Error("body-read-failed");
+  } finally {
+    abortSignal.removeEventListener("abort", onAbort);
+    reader.releaseLock();
+  }
+  if (abortSignal.aborted) return { body: null, tooLarge: false, aborted: true };
+  if (chunks.length === 0) return { body: null, tooLarge: false, aborted: false };
   const buf = new Uint8Array(total);
   let offset = 0;
   for (const c of chunks) { buf.set(c, offset); offset += c.length; }
-  return { body: buf, tooLarge: false };
+  return { body: buf, tooLarge: false, aborted: false };
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
@@ -133,32 +157,56 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
   }
 
-  // Streaming-cap complement to the Content-Length pre-flight: a client that
-  // omits Content-Length (or uses Transfer-Encoding: chunked) skips the
-  // header check, so we MUST read the body ourselves with a running byte
-  // counter before letting fetch ship it upstream. Buffer-and-cap rather
-  // than stream-through-with-cap — see readBodyWithCap docstring for the
-  // race-condition rationale.
-  let bufferedBody: Uint8Array | null = null;
-  if (isBodyMethod && event.request.body) {
-    const { body: buf, tooLarge } = await readBodyWithCap(event.request.body, MAX_PROXY_BODY_BYTES);
-    if (tooLarge) return new Response("Payload Too Large", { status: 413 });
-    bufferedBody = buf;
-  }
-
-  // Shared AbortController fans two abort sources into one upstream-fetch
-  // signal: (a) browser disconnect via event.request.signal — pre-fix, a
-  // closed client connection left the upstream fetch hanging until the
-  // timeout fired, leaking a server slot for up to UPSTREAM_TIMEOUT_MS;
-  // (b) the upstream timeout. Pattern: addEventListener-based composition
-  // works on all Node 18+; AbortSignal.any() (Node 18.17+/20.3+) is the
-  // syntactic-sugar equivalent we intentionally avoid for engine breadth.
+  // Shared AbortController hoisted ABOVE the body-buffer step. Pre-fix
+  // (keryx C-3, 2026-05-22T1455Z) the controller + timer were set up only
+  // around the upstream-fetch call, so a slowloris client dripping bytes
+  // into readBodyWithCap held a SvelteKit server slot until the platform's
+  // idle timeout (tens of seconds to minutes), entirely outside the
+  // documented UPSTREAM_TIMEOUT_MS budget. Now both phases share one timer.
+  //
+  // Three abort sources fan into `ac.signal`:
+  //   (a) client disconnect via event.request.signal
+  //   (b) UPSTREAM_TIMEOUT_MS timer
+  //   (c) (implicit) the cap-exceeded branch returns directly
+  // Pattern: addEventListener composition (engine-breadth-safe on Node 18+).
+  // We deliberately avoid AbortSignal.any() to keep the floor at Node 18.0
+  // — matches the SDK's `packages/sdk/package.json` engines requirement.
   const ac = new AbortController();
   const onClientAbort = () => ac.abort(new Error("client-disconnected"));
-  event.request.signal.addEventListener("abort", onClientAbort, { once: true });
+  // Canonical check-then-listen idiom (keryx I-2): per WHATWG DOM, an
+  // already-aborted signal will NOT fire addEventListener; check explicitly.
+  //   https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/aborted
+  if (event.request.signal.aborted) {
+    ac.abort(event.request.signal.reason ?? new Error("client-disconnected"));
+  } else {
+    event.request.signal.addEventListener("abort", onClientAbort, { once: true });
+  }
   const timeoutId = setTimeout(() => ac.abort(new Error("upstream-timeout")), UPSTREAM_TIMEOUT_MS);
 
   try {
+    // Streaming-cap complement to the Content-Length pre-flight: a client
+    // that omits Content-Length (or uses Transfer-Encoding: chunked) skips
+    // the header check, so we MUST read the body ourselves with a running
+    // byte counter before letting fetch ship it upstream. The read is now
+    // bound to `ac.signal` so the UPSTREAM_TIMEOUT_MS budget covers
+    // body-buffer + upstream-fetch as a single window.
+    let bufferedBody: Uint8Array | null = null;
+    if (isBodyMethod && event.request.body) {
+      const { body: buf, tooLarge, aborted } = await readBodyWithCap(
+        event.request.body,
+        MAX_PROXY_BODY_BYTES,
+        ac.signal,
+      );
+      if (tooLarge) return new Response("Payload Too Large", { status: 413 });
+      if (aborted) {
+        // ac fired during body-buffer — either client disconnect or the
+        // UPSTREAM_TIMEOUT_MS timer expired. Both surface as 504; the
+        // upstream never received anything.
+        return new Response("Upstream Timeout", { status: 504 });
+      }
+      bufferedBody = buf;
+    }
+
     return await fetch(target, {
       method: event.request.method,
       headers: forwarded,
