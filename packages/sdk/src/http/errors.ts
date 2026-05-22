@@ -1,6 +1,31 @@
+/**
+ * Server-emitted error codes. Listed here as a literal union so consumers
+ * writing `if (err.code === "rate_limited")` get a typo warning while the
+ * SDK keeps room for forward-compat: the `(string & {})` arm allows any
+ * future server-added code without breaking the type, while IntelliSense
+ * still suggests the documented values.
+ *
+ * Pattern from the TypeScript handbook — "literal types meeting branded
+ * primitives" (the `& {}` arm preserves suggestions in editor tooling).
+ * Authoritative list mirrors __tests__/errors.test.ts case rows.
+ */
+export type LinkgrepErrorCode =
+  | "bad_request"
+  | "unauthorized"
+  | "permission_denied"
+  | "not_found"
+  | "conflict"
+  | "gone"
+  | "unprocessable"
+  | "rate_limited"
+  | "internal_error"
+  | "unknown"
+  // eslint-disable-next-line @typescript-eslint/ban-types
+  | (string & {});
+
 export interface LinkgrepErrorInit {
   status: number;
-  code: string;
+  code: LinkgrepErrorCode;
   message: string;
   docUrl?: string;
   requestId?: string;
@@ -10,7 +35,7 @@ export interface LinkgrepErrorInit {
 
 export class LinkgrepError extends Error {
   readonly status: number;
-  readonly code: string;
+  readonly code: LinkgrepErrorCode;
   readonly docUrl?: string;
   readonly requestId?: string;
   readonly raw: unknown;

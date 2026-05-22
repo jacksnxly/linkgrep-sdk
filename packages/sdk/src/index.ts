@@ -14,7 +14,7 @@ export {
   InternalServerError,
   LinkgrepNetworkError,
 } from "./http/errors.js";
-export type { Result } from "./http/errors.js";
+export type { Result, LinkgrepErrorCode, LinkgrepNetworkErrorKind } from "./http/errors.js";
 export type { LeadTracker, TrackLeadResult } from "./track/lead.js";
 export type { SaleTracker, TrackSaleResult } from "./track/sale.js";
 export type {
