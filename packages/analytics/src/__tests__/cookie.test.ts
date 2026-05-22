@@ -50,12 +50,18 @@ describe("cookie utilities", () => {
       configurable: true,
     });
 
-    setCookie("lg_click_id", "abc", { domain: ".athenum.xyz", sameSite: "Lax", secure: true });
+    // Wrap assertions in try/finally so a failed expect cannot leak the spy
+    // descriptor into subsequent tests in the same vitest worker. The
+    // sibling test in core.test.ts already uses this pattern; mirror it
+    // here. #I4 demonstrated the leak with a standalone repro.
+    try {
+      setCookie("lg_click_id", "abc", { domain: ".athenum.xyz", sameSite: "Lax", secure: true });
 
-    expect(writes.some(w => w.includes("Domain=.athenum.xyz"))).toBe(true);
-    expect(writes.some(w => w.includes("SameSite=Lax"))).toBe(true);
-    expect(writes.some(w => w.includes("Secure"))).toBe(true);
-
-    Object.defineProperty(document, "cookie", original!);
+      expect(writes.some(w => w.includes("Domain=.athenum.xyz"))).toBe(true);
+      expect(writes.some(w => w.includes("SameSite=Lax"))).toBe(true);
+      expect(writes.some(w => w.includes("Secure"))).toBe(true);
+    } finally {
+      Object.defineProperty(document, "cookie", original!);
+    }
   });
 });
