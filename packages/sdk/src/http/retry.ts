@@ -2,15 +2,39 @@ import { LinkgrepError, RateLimitError } from "./errors.js";
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
-// Cap on server-supplied Retry-After to avoid a malicious / misconfigured
-// server stalling the SDK indefinitely. Callers can still surface the raw
-// value via RateLimitError.retryAfter if they need to do their own scheduling.
-const MAX_RETRY_AFTER_MS = 60_000;
+/**
+ * Caller-tunable retry policy. Mirrors the knob surface of mature retry
+ * libraries (AWS SDK retry config, undici Retry interceptor): a max number
+ * of attempts, a base delay for the exponential backoff, and a hard cap on
+ * how long the SDK is willing to wait per attempt for a server-supplied
+ * Retry-After. AWS Architecture Blog on exponential backoff + jitter:
+ * https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+ */
+export interface RetryOptions {
+  /** Total attempts INCLUDING the first call. Default: 3. */
+  maxAttempts?: number;
+  /** Base exponential-backoff delay in ms. Default: 1000. */
+  baseDelayMs?: number;
+  /** Hard ceiling on the SDK's wait for server Retry-After, in ms. Default: 60_000. */
+  maxRetryAfterMs?: number;
+}
+
+const DEFAULT_RETRY: Required<RetryOptions> = {
+  maxAttempts: 3,
+  baseDelayMs: 1000,
+  maxRetryAfterMs: 60_000,
+};
 
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  maxAttempts = 3,
+  options: RetryOptions | number = DEFAULT_RETRY,
 ): Promise<T> {
+  // Back-compat: old signature accepted a bare `maxAttempts` number.
+  const opts =
+    typeof options === "number"
+      ? { ...DEFAULT_RETRY, maxAttempts: options }
+      : { ...DEFAULT_RETRY, ...options };
+  const { maxAttempts, baseDelayMs, maxRetryAfterMs } = opts;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -31,13 +55,13 @@ export async function withRetry<T>(
       // truncating — the caller has err.retryAfter and can schedule its own
       // retry. Refusing to wedge here protects the SDK budget without lying
       // to the application about how long the server actually asked for.
-      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 > MAX_RETRY_AFTER_MS) {
+      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 > maxRetryAfterMs) {
         throw err;
       }
       lastError = err;
       if (attempt < maxAttempts - 1) {
         // Exponential backoff with ±20% jitter.
-        const base = Math.pow(2, attempt) * 1000;
+        const base = Math.pow(2, attempt) * baseDelayMs;
         const jitter = base * (0.8 + Math.random() * 0.4);
 
         // When honoring Retry-After, add small additive jitter so concurrent
@@ -48,13 +72,13 @@ export async function withRetry<T>(
         if (err instanceof RateLimitError && err.retryAfter !== undefined) {
           const retryAfterMs = err.retryAfter * 1000;
           const floorJitter = Math.random() * Math.min(1000, retryAfterMs * 0.1);
-          // Clamp post-jitter to MAX_RETRY_AFTER_MS so the documented cap
-          // ("won't stall longer than 60s") holds end-to-end. Without this
-          // clamp, retryAfter=60 + worst-case jitter could sleep ~61s,
-          // breaching the invariant the caller relies on.
+          // Clamp post-jitter to maxRetryAfterMs so the documented cap holds
+          // end-to-end. Without this clamp, retryAfter at exactly the cap +
+          // worst-case jitter could sleep ~1s past the cap, breaching the
+          // invariant the caller relies on.
           sleepMs = Math.min(
             Math.max(retryAfterMs + floorJitter, jitter),
-            MAX_RETRY_AFTER_MS,
+            maxRetryAfterMs,
           );
         }
         await new Promise(r => setTimeout(r, sleepMs));

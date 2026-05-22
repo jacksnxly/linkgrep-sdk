@@ -1,5 +1,6 @@
 export { Linkgrep } from "./linkgrep.js";
 export type { LinkgrepOptions } from "./linkgrep.js";
+export type { RetryOptions } from "./http/retry.js";
 export {
   LinkgrepError,
   BadRequestError,
