@@ -142,18 +142,29 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
     case 422:
       return new UnprocessableEntityError(init);
     case 429: {
-      const retryAfterRaw = res.headers.get("retry-after");
-      const retryAfter = retryAfterRaw ? Number(retryAfterRaw) : undefined;
-      return new RateLimitError({
-        ...init,
-        retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined,
-      });
+      // RFC 9110 §10.2.3: Retry-After = HTTP-date / delay-seconds.
+      // https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
+      return new RateLimitError({ ...init, retryAfter: parseRetryAfter(res.headers.get("retry-after")) });
     }
     case 500:
       return new InternalServerError(init);
     default:
       return new LinkgrepError(init);
   }
+}
+
+/**
+ * Parse a Retry-After header value (delta-seconds OR HTTP-date) into a number
+ * of seconds from now. Returns undefined for missing / malformed values.
+ * RFC 9110 §10.2.3.
+ */
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const asSeconds = Number(raw);
+  if (Number.isFinite(asSeconds)) return asSeconds;
+  const asDate = Date.parse(raw);
+  if (Number.isFinite(asDate)) return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
+  return undefined;
 }
 
 /**

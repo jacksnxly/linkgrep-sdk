@@ -26,18 +26,29 @@ export async function withRetry<T>(
       if (err instanceof LinkgrepError && !RETRYABLE_STATUS.has(err.status)) {
         throw err;
       }
+      // Honor server's Retry-After on 429 (RFC 9110 §10.2.3). If it exceeds
+      // our cap, surface the RateLimitError to the caller instead of silently
+      // truncating — the caller has err.retryAfter and can schedule its own
+      // retry. Refusing to wedge here protects the SDK budget without lying
+      // to the application about how long the server actually asked for.
+      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 > MAX_RETRY_AFTER_MS) {
+        throw err;
+      }
       lastError = err;
       if (attempt < maxAttempts - 1) {
         // Exponential backoff with ±20% jitter.
         const base = Math.pow(2, attempt) * 1000;
         const jitter = base * (0.8 + Math.random() * 0.4);
 
-        // Honor server's Retry-After on 429 (RFC 9110 §10.2.3). Cap to
-        // MAX_RETRY_AFTER_MS so a hostile server cannot wedge the SDK.
+        // When honoring Retry-After, add small additive jitter so concurrent
+        // clients don't synchronize on the exact recovery instant. AWS calls
+        // this the "thundering herd" prevention pattern (AWS SDK retry docs:
+        // https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html).
         let sleepMs = jitter;
         if (err instanceof RateLimitError && err.retryAfter !== undefined) {
-          const retryAfterMs = Math.min(err.retryAfter * 1000, MAX_RETRY_AFTER_MS);
-          sleepMs = Math.max(retryAfterMs, jitter);
+          const retryAfterMs = err.retryAfter * 1000;
+          const floorJitter = Math.random() * Math.min(1000, retryAfterMs * 0.1);
+          sleepMs = Math.max(retryAfterMs + floorJitter, jitter);
         }
         await new Promise(r => setTimeout(r, sleepMs));
       }

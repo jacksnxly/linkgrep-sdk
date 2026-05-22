@@ -66,25 +66,19 @@ describe("parseErrorResponse — Retry-After dual format (#I3a)", () => {
 // raw value on err.retryAfter for its own scheduling.
 describe("withRetry — Retry-After above cap (#I3b)", () => {
   it("throws RateLimitError without retrying when retryAfter exceeds cap", async () => {
-    vi.useFakeTimers();
-    try {
-      const fn = vi.fn(async () => {
-        throw new RateLimitError({
-          status: 429,
-          code: "rate_limited",
-          message: "long wait",
-          raw: null,
-          headers: new Headers(),
-          retryAfter: 600, // 10 min, way over the 60s cap
-        });
+    const fn = vi.fn(async () => {
+      throw new RateLimitError({
+        status: 429,
+        code: "rate_limited",
+        message: "long wait",
+        raw: null,
+        headers: new Headers(),
+        retryAfter: 600, // 10 min, way over the 60s cap
       });
-      const p = withRetry(fn, 3);
-      await vi.runAllTimersAsync();
-      await expect(p).rejects.toBeInstanceOf(RateLimitError);
-      expect(fn).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    });
+    // No fake timers needed: the cap path must throw without sleeping.
+    await expect(withRetry(fn, 3)).rejects.toBeInstanceOf(RateLimitError);
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 
