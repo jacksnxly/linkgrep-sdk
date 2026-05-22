@@ -1,4 +1,4 @@
-import { ConflictError, parseErrorResponse } from "./errors.js";
+import { parseErrorResponse } from "./errors.js";
 import { withRetry } from "./retry.js";
 
 export interface HttpClientOptions {
@@ -65,5 +65,3 @@ export class HttpClient {
   }
 }
 
-// Re-exported so track/* can catch on it without reaching into errors.js.
-export { ConflictError };

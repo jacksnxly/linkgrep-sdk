@@ -179,6 +179,19 @@ export type Result<T, E = LinkgrepError> =
   | { ok: false; error: E };
 
 /**
+ * Map 409 Conflict into a `{ duplicate: true }` sentinel for endpoints whose
+ * idempotency contract surfaces conflicts as a no-op marker rather than an
+ * error. Centralized here so every track endpoint shares the same translation;
+ * if the marker shape evolves, it changes in one place.
+ */
+export async function mapConflict<T extends { duplicate?: boolean }>(p: Promise<T>): Promise<T> {
+  return p.catch((e: unknown) => {
+    if (e instanceof ConflictError) return { duplicate: true } as T;
+    throw e;
+  });
+}
+
+/**
  * Wrap a throwing async operation into a Result. Used by .safe() variants.
  * LinkgrepError is preserved on `result.error`; raw network `Error`s (fetch
  * failures, DNS errors, aborts) are also returned as-is. The error type is
