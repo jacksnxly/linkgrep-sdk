@@ -20,11 +20,21 @@ jobs:
       # https://docs.npmjs.com/trusted-publishers
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      # SHA-pin every action on this OIDC-publishing workflow. Mutable major
+      # tags (@v4, @v1) can be force-pushed by a compromised action repo,
+      # and the next release run would mint an npm OIDC token under
+      # attacker-controlled code — auto-generating a provenance attestation
+      # over the malicious tarball. The tj-actions/changed-files compromise
+      # (CVE-2025-30066, 2025-03-14/15) was exactly this pattern. Per
+      # docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions:
+      # "Pinning an action to a full-length commit SHA is currently the
+      # only way to use an action as an immutable release." Dependabot
+      # keeps these current via PRs.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       # pnpm version comes from package.json `packageManager`. Specifying
       # `with: version:` here too triggers ERR_PNPM_BAD_PM_VERSION on v4.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -58,7 +68,7 @@ jobs:
       # https://docs.npmjs.com/generating-provenance-statements
       - name: Create Release PR or Publish
         id: changesets
-        uses: changesets/action@v1
+        uses: changesets/action@63a615b9cd06ba9a3e6d13796c7fbcb080a60a0b  # v1.8.0
         with:
           publish: pnpm release
         env:
