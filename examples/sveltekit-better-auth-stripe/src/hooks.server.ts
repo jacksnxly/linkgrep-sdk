@@ -101,12 +101,19 @@ async function readBodyWithCap(
       }
       chunks.push(value);
     }
-  } catch {
+  } catch (e) {
     // A reader.cancel() race + abort propagation can cause read() to reject
     // with a synthetic error; treat any rejection that lands while the
     // signal is aborted as a deliberate abort.
     if (abortSignal.aborted) return { body: null, tooLarge: false, aborted: true };
-    throw new Error("body-read-failed");
+    // Preserve the original cause so the outer 502/504 routing in the
+    // request handler can distinguish "client disconnected mid-read" from
+    // runtime-pressure failures (Uint8Array overflow, OOM, etc.). Per MDN,
+    // `new Error(message, { cause })` has been Baseline Widely available
+    // since September 2021. Without `cause`, the chained throw at the
+    // outer catch loses all diagnostic context.
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause
+    throw new Error("body-read-failed", { cause: e });
   } finally {
     abortSignal.removeEventListener("abort", onAbort);
     reader.releaseLock();
