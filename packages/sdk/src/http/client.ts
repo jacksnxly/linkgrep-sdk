@@ -12,6 +12,12 @@ export interface HttpClientOptions {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+// Hard cap on response-body size. Linkgrep track responses are <2 KiB; 1 MiB
+// is generous headroom that still bounds the heap a misbehaving / hostile /
+// MITM origin can force the SDK to allocate. Applied to both success and
+// error paths in post() below.
+const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
+
 export class HttpClient {
   private readonly token: string;
   private readonly baseUrl: string;
@@ -48,6 +54,21 @@ export class HttpClient {
         // (MDN). retry.ts treats both Abort/Timeout as terminal.
         signal: AbortSignal.timeout(this.timeoutMs),
       });
+
+      // Pre-flight response-size check: refuse to parse oversized bodies into
+      // heap. Applied BEFORE .ok branching so 4xx/5xx envelopes are guarded
+      // too. A misbehaving / MITM origin can otherwise force multi-MiB JSON
+      // allocation in the SDK consumer's process.
+      const declared = res.headers.get("content-length");
+      if (declared !== null) {
+        const len = Number.parseInt(declared, 10);
+        if (Number.isFinite(len) && len > DEFAULT_MAX_RESPONSE_BYTES) {
+          throw new LinkgrepNetworkError(
+            "network",
+            `response too large: ${len} bytes (cap ${DEFAULT_MAX_RESPONSE_BYTES})`,
+          );
+        }
+      }
 
       if (!res.ok) {
         // Narrow the swallow to JSON parse errors. AbortSignal.timeout binds
