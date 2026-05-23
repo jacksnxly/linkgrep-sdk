@@ -1,7 +1,7 @@
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { http, HttpResponse } from "msw";
-import { server } from "./msw-server.js";
 import { Linkgrep } from "../linkgrep.js";
+import { server } from "./msw-server.js";
 
 const BASE = "https://api.linkgrep.xyz";
 
@@ -9,10 +9,7 @@ describe("linkgrep.track.lead", () => {
   it("posts to /api/track/lead and returns response", async () => {
     server.use(
       http.post(`${BASE}/api/track/lead`, () =>
-        HttpResponse.json(
-          { customerId: "cus_abc123", clickId: "click_xyz" },
-          { status: 201 },
-        ),
+        HttpResponse.json({ customerId: "cus_abc123", clickId: "click_xyz" }, { status: 201 }),
       ),
     );
 
@@ -28,11 +25,7 @@ describe("linkgrep.track.lead", () => {
   });
 
   it("returns { duplicate: true } on 409 without throwing", async () => {
-    server.use(
-      http.post(`${BASE}/api/track/lead`, () =>
-        new HttpResponse(null, { status: 409 }),
-      ),
-    );
+    server.use(http.post(`${BASE}/api/track/lead`, () => new HttpResponse(null, { status: 409 })));
 
     const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.lead({
@@ -47,7 +40,7 @@ describe("linkgrep.track.lead", () => {
     let body: Record<string, unknown> = {};
     server.use(
       http.post(`${BASE}/api/track/lead`, async ({ request }) => {
-        body = await request.json() as Record<string, unknown>;
+        body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ customerId: "cus_abc" }, { status: 201 });
       }),
     );
@@ -76,7 +69,7 @@ describe("linkgrep.track.lead", () => {
     let body: Record<string, unknown> = {};
     server.use(
       http.post(`${BASE}/api/track/lead`, async ({ request }) => {
-        body = await request.json() as Record<string, unknown>;
+        body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ customerId: "cus_abc" }, { status: 201 });
       }),
     );
@@ -96,7 +89,7 @@ describe("linkgrep.track.lead", () => {
     let body: Record<string, unknown> = {};
     server.use(
       http.post(`${BASE}/api/track/lead`, async ({ request }) => {
-        body = await request.json() as Record<string, unknown>;
+        body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ customerId: "cus_abc" }, { status: 201 });
       }),
     );
@@ -112,11 +105,7 @@ describe("linkgrep.track.lead", () => {
   });
 
   it("track.lead.safe returns { ok: false } on 500 instead of throwing", async () => {
-    server.use(
-      http.post(`${BASE}/api/track/lead`, () =>
-        new HttpResponse(null, { status: 500 }),
-      ),
-    );
+    server.use(http.post(`${BASE}/api/track/lead`, () => new HttpResponse(null, { status: 500 })));
 
     const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.lead.safe({

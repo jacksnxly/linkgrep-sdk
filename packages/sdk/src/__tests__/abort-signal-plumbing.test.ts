@@ -8,8 +8,9 @@
 //          parent request abort).
 //   - I-4: HttpClientOptions must accept an injectable `fetch` for
 //          Cloudflare Workers / undici Agent / test-stub use cases.
-import { afterEach, describe, expect, it } from "vitest";
+
 import { http } from "msw";
+import { afterEach, describe, expect, it } from "vitest";
 import { Linkgrep, LinkgrepNetworkError } from "../index.js";
 import { server } from "./msw-server.js";
 
@@ -25,7 +26,13 @@ describe("C-2: totalBudgetMs bounds the in-flight per-attempt request", () => {
     // headers but hangs on the body. The pre-fix behavior blocked for
     // `timeoutMs` (2s here); the contract says ~totalBudgetMs (200ms).
     server.use(
-      http.post(`${BASE}/api/track/lead`, () => new Promise(() => { /* never */ })),
+      http.post(
+        `${BASE}/api/track/lead`,
+        () =>
+          new Promise(() => {
+            /* never */
+          }),
+      ),
     );
     const lg = new Linkgrep({
       token: "t",
@@ -44,7 +51,9 @@ describe("C-2: totalBudgetMs bounds the in-flight per-attempt request", () => {
     expect(threw).toBeInstanceOf(LinkgrepNetworkError);
     // Allow generous headroom — anything well under timeoutMs proves the
     // budget gate is closing the attempt, not the per-attempt timer.
-    expect(elapsed, `must time out within ~totalBudgetMs (200ms), got ${elapsed}ms`).toBeLessThan(800);
+    expect(elapsed, `must time out within ~totalBudgetMs (200ms), got ${elapsed}ms`).toBeLessThan(
+      800,
+    );
   });
 });
 
@@ -77,10 +86,15 @@ describe("I-3: caller-supplied AbortSignal cancels mid-retry", () => {
       threw = e;
     }
     const elapsed = Date.now() - start;
-    expect(threw, "abort signal must surface a terminal transport error").toBeInstanceOf(LinkgrepNetworkError);
+    expect(threw, "abort signal must surface a terminal transport error").toBeInstanceOf(
+      LinkgrepNetworkError,
+    );
     expect((threw as LinkgrepNetworkError).kind).toBe("abort");
     expect(hits, "should have attempted at most once before abort fired").toBeLessThanOrEqual(1);
-    expect(elapsed, `caller abort must short-circuit the backoff sleep (~100ms), got ${elapsed}ms`).toBeLessThan(400);
+    expect(
+      elapsed,
+      `caller abort must short-circuit the backoff sleep (~100ms), got ${elapsed}ms`,
+    ).toBeLessThan(400);
   });
 });
 
@@ -104,7 +118,9 @@ describe("I-4: injectable fetch transport", () => {
     expect(calls.length, "custom fetch must be called instead of global").toBe(1);
     expect(calls[0]!.input).toBe(`${BASE}/api/track/lead`);
     expect(calls[0]!.init.method).toBe("POST");
-    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe("Bearer test-token");
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer test-token",
+    );
     expect(result).toEqual({ customerId: "cus_injected" });
   });
 });

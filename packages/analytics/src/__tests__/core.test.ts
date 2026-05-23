@@ -1,5 +1,5 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import { init, getClickId } from "../core.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { getClickId, init } from "../core.js";
 
 describe("init()", () => {
   beforeEach(() => {
@@ -9,8 +9,8 @@ describe("init()", () => {
       writable: true,
     });
     // clear cookies
-    document.cookie.split(";").forEach(c => {
-      document.cookie = c.trim().split("=")[0] + "=;Max-Age=0;Path=/";
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = `${c.trim().split("=")[0]}=;Max-Age=0;Path=/`;
     });
   });
 
@@ -39,15 +39,20 @@ describe("init()", () => {
 
     const writes: string[] = [];
     Object.defineProperty(document, "cookie", {
-      set(v: string) { writes.push(v); original!.set?.call(this, v); },
-      get() { return original!.get?.call(this) ?? ""; },
+      set(v: string) {
+        writes.push(v);
+        original!.set?.call(this, v);
+      },
+      get() {
+        return original!.get?.call(this) ?? "";
+      },
       configurable: true,
     });
 
     try {
       window.location.search = "?lg_id=abc";
       init({ cookieDomain: ".athenum.xyz" });
-      expect(writes.some(w => w.includes("Domain=.athenum.xyz"))).toBe(true);
+      expect(writes.some((w) => w.includes("Domain=.athenum.xyz"))).toBe(true);
     } finally {
       Object.defineProperty(document, "cookie", original);
     }
@@ -68,7 +73,7 @@ describe("init()", () => {
   });
 
   it("ignores ?lg_id= values with whitespace, =, or other illegal cookie-octets", () => {
-    for (const bad of ["foo bar", "foo=bar", "foo,bar", "foo\"bar", "foo\\bar"]) {
+    for (const bad of ["foo bar", "foo=bar", "foo,bar", 'foo"bar', "foo\\bar"]) {
       window.location.search = `?lg_id=${encodeURIComponent(bad)}`;
       init();
       expect(getClickId(), `payload: ${JSON.stringify(bad)}`).toBeUndefined();
@@ -98,8 +103,13 @@ describe("init()", () => {
 
     let writeCount = 0;
     Object.defineProperty(document, "cookie", {
-      set(v: string) { writeCount++; original!.set?.call(this, v); },
-      get() { return original!.get?.call(this) ?? ""; },
+      set(v: string) {
+        writeCount++;
+        original!.set?.call(this, v);
+      },
+      get() {
+        return original!.get?.call(this) ?? "";
+      },
       configurable: true,
     });
 
@@ -127,8 +137,8 @@ describe("init()", () => {
 // User Input" — session/attribution identifiers are validated and verified.
 describe("getClickId() defense-in-depth validation", () => {
   beforeEach(() => {
-    document.cookie.split(";").forEach(c => {
-      document.cookie = c.trim().split("=")[0] + "=;Max-Age=0;Path=/";
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = `${c.trim().split("=")[0]}=;Max-Age=0;Path=/`;
     });
   });
 
@@ -145,7 +155,9 @@ describe("getClickId() defense-in-depth validation", () => {
     }
     if (!original) throw new Error("cookie descriptor not found");
     Object.defineProperty(document, "cookie", {
-      get() { return "lgr_id=foo bar"; }, // space is illegal per CLICK_ID_PATTERN
+      get() {
+        return "lgr_id=foo bar";
+      }, // space is illegal per CLICK_ID_PATTERN
       set() {},
       configurable: true,
     });
@@ -171,7 +183,9 @@ describe("getClickId() defense-in-depth validation", () => {
     }
     if (!original) throw new Error("cookie descriptor not found");
     Object.defineProperty(document, "cookie", {
-      get() { return "lgr_id=foo\x01bar"; },
+      get() {
+        return "lgr_id=foo\x01bar";
+      },
       set() {},
       configurable: true,
     });

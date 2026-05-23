@@ -1,7 +1,7 @@
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { http, HttpResponse } from "msw";
-import { server } from "./msw-server.js";
 import { Linkgrep } from "../linkgrep.js";
+import { server } from "./msw-server.js";
 
 const BASE = "https://api.linkgrep.xyz";
 
@@ -30,11 +30,7 @@ describe("linkgrep.track.sale", () => {
   });
 
   it("returns { duplicate: true } on 409", async () => {
-    server.use(
-      http.post(`${BASE}/api/track/sale`, () =>
-        new HttpResponse(null, { status: 409 }),
-      ),
-    );
+    server.use(http.post(`${BASE}/api/track/sale`, () => new HttpResponse(null, { status: 409 })));
 
     const linkgrep = new Linkgrep({ token: "test_key" });
     const result = await linkgrep.track.sale({
@@ -49,7 +45,7 @@ describe("linkgrep.track.sale", () => {
     let body: Record<string, unknown> = {};
     server.use(
       http.post(`${BASE}/api/track/sale`, async ({ request }) => {
-        body = await request.json() as Record<string, unknown>;
+        body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ status: "pending" }, { status: 201 });
       }),
     );
@@ -76,7 +72,7 @@ describe("linkgrep.track.sale", () => {
     let body: Record<string, unknown> = {};
     server.use(
       http.post(`${BASE}/api/track/sale`, async ({ request }) => {
-        body = await request.json() as Record<string, unknown>;
+        body = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({ status: "pending" }, { status: 201 });
       }),
     );

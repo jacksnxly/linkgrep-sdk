@@ -1,10 +1,10 @@
-import { beforeAll, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
+import type { AddressInfo } from "node:net";
 import { http, passthrough } from "msw";
-import { server as mswServer } from "./msw-server.js";
+import { beforeAll, describe, expect, it } from "vitest";
 import { HttpClient } from "../http/client.js";
 import { LinkgrepError, LinkgrepNetworkError } from "../http/errors.js";
+import { server as mswServer } from "./msw-server.js";
 
 // The shared MSW server intercepts every fetch (onUnhandledRequest: "error").
 // This test hits a real localhost server, so register a passthrough for it.
@@ -61,7 +61,9 @@ describe("HttpClient — body-read TimeoutError propagation (#I1, A1)", () => {
       expect(thrown).toBeInstanceOf(LinkgrepNetworkError);
       expect((thrown as LinkgrepNetworkError).kind).toBe("timeout");
       expect(thrown).not.toBeInstanceOf(LinkgrepError);
-      expect(((thrown as LinkgrepNetworkError).cause as Error | undefined)?.name).toBe("TimeoutError");
+      expect(((thrown as LinkgrepNetworkError).cause as Error | undefined)?.name).toBe(
+        "TimeoutError",
+      );
       expect(elapsed).toBeLessThan(1500);
     } finally {
       server.closeAllConnections?.();

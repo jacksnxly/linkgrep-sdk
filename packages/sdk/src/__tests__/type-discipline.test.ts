@@ -4,8 +4,9 @@
 //   - I-14: default `mode` selection moved from the better-auth adapter
 //           into the SDK — `mode` derives from `clickId` presence when
 //           the caller omits it.
+
+import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
-import { http, HttpResponse } from "msw";
 import { Linkgrep, LinkgrepNetworkError } from "../index.js";
 import { server } from "./msw-server.js";
 
@@ -27,13 +28,18 @@ describe("I-12: parse-seam guard rejects non-object response bodies", () => {
     } catch (e) {
       threw = e;
     }
-    expect(threw, "array response must throw, not return [1,2,3] typed as TrackLeadResponse").toBeInstanceOf(LinkgrepNetworkError);
+    expect(
+      threw,
+      "array response must throw, not return [1,2,3] typed as TrackLeadResponse",
+    ).toBeInstanceOf(LinkgrepNetworkError);
     expect((threw as Error).message).toMatch(/not a JSON object/i);
   });
 
   it("primitive response surfaces as LinkgrepNetworkError", async () => {
     server.use(
-      http.post(`${BASE}/api/track/sale`, () => HttpResponse.json("just a string", { status: 200 })),
+      http.post(`${BASE}/api/track/sale`, () =>
+        HttpResponse.json("just a string", { status: 200 }),
+      ),
     );
     const lg = new Linkgrep({ token: "t", baseUrl: BASE, retry: { maxAttempts: 1 } });
     let threw: unknown;

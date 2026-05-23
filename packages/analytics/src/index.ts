@@ -1,4 +1,3 @@
-export { init, getClickId } from "./core.js";
 // Re-export the canonical cookie name from the SDK so consumers of
 // @linkgrep/analytics don't need to also depend on `linkgrep` for it.
 //
@@ -15,3 +14,4 @@ export { init, getClickId } from "./core.js";
 // subpath; `script-bundle.test.ts` guards both bundles against regression.
 export { DEFAULT_CLICK_ID_COOKIE } from "linkgrep/protocol";
 export type { LinkgrepBrowserAnalyticsOptions } from "./core.js";
+export { getClickId, init } from "./core.js";

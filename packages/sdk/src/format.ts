@@ -11,7 +11,7 @@
 // preferring structured JSON should provide their own `onError` callback
 // and ignore this helper — see packages/better-auth/src/plugin.ts.
 
-import { LinkgrepError, LinkgrepNetworkError } from "./http/errors.js";
+import { LinkgrepError, type LinkgrepNetworkError } from "./http/errors.js";
 
 /**
  * Render a LinkgrepError or LinkgrepNetworkError into a single-line
@@ -61,10 +61,8 @@ export function formatTrackError(
   error: LinkgrepError | LinkgrepNetworkError,
 ): string {
   if (error instanceof LinkgrepError) {
-    const requestId =
-      error.requestId !== undefined ? JSON.stringify(error.requestId) : "-";
-    const docUrl =
-      error.docUrl !== undefined ? JSON.stringify(error.docUrl) : "-";
+    const requestId = error.requestId !== undefined ? JSON.stringify(error.requestId) : "-";
+    const docUrl = error.docUrl !== undefined ? JSON.stringify(error.docUrl) : "-";
     return `[linkgrep] ${prefix} failed: code=${error.code} status=${error.status} requestId=${requestId} docUrl=${docUrl} message=${JSON.stringify(error.message)}`;
   }
   // LinkgrepNetworkError branch (sealed union; no other arms exist).

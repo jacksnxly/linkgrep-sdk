@@ -6,11 +6,7 @@
 // this test pins the shape — adding / renaming / dropping a field here
 // is the explicit decision-point for both consumers simultaneously.
 import { describe, expect, it } from "vitest";
-import {
-  formatTrackError,
-  LinkgrepError,
-  LinkgrepNetworkError,
-} from "../index.js";
+import { formatTrackError, LinkgrepError, LinkgrepNetworkError } from "../index.js";
 
 describe("formatTrackError — single-source structured-log shape", () => {
   it("LinkgrepError emits code / status / requestId / docUrl / message", () => {
@@ -24,7 +20,7 @@ describe("formatTrackError — single-source structured-log shape", () => {
       headers: new Headers(),
     });
     expect(formatTrackError("track.sale", err)).toBe(
-      "[linkgrep] track.sale failed: code=unprocessable status=422 requestId=\"req_abc123\" docUrl=\"https://docs.linkgrep.xyz/errors/unprocessable\" message=\"amount must be > 0\"",
+      '[linkgrep] track.sale failed: code=unprocessable status=422 requestId="req_abc123" docUrl="https://docs.linkgrep.xyz/errors/unprocessable" message="amount must be > 0"',
     );
   });
 
@@ -37,14 +33,14 @@ describe("formatTrackError — single-source structured-log shape", () => {
       headers: new Headers(),
     });
     expect(formatTrackError("track.lead", err)).toBe(
-      "[linkgrep] track.lead failed: code=internal_error status=500 requestId=- docUrl=- message=\"boom\"",
+      '[linkgrep] track.lead failed: code=internal_error status=500 requestId=- docUrl=- message="boom"',
     );
   });
 
   it("LinkgrepNetworkError emits kind / message", () => {
     const err = new LinkgrepNetworkError("timeout", "request budget exhausted");
     expect(formatTrackError("track.lead", err)).toBe(
-      "[linkgrep] track.lead transport failure: kind=timeout message=\"request budget exhausted\"",
+      '[linkgrep] track.lead transport failure: kind=timeout message="request budget exhausted"',
     );
   });
 
@@ -127,8 +123,7 @@ describe("formatTrackError — single-source structured-log shape", () => {
   // server-controlled byte in log output, even ones nominally URL-shaped.
   describe("logfmt safety — hostile docUrl / requestId", () => {
     it("escapes embedded newlines and injected message= in error.docUrl", () => {
-      const hostileDocUrl =
-        "https://docs.linkgrep.xyz/foo\nfake_key=val\nmessage=stolen";
+      const hostileDocUrl = "https://docs.linkgrep.xyz/foo\nfake_key=val\nmessage=stolen";
       const err = new LinkgrepError({
         status: 400,
         code: "bad_request",
@@ -157,7 +152,7 @@ describe("formatTrackError — single-source structured-log shape", () => {
       expect(JSON.parse(docUrlValue!)).toBe(hostileDocUrl);
     });
 
-    it("escapes embedded `=` and `\"` in error.requestId", () => {
+    it('escapes embedded `=` and `"` in error.requestId', () => {
       // HTTP/1.1 + HTTP/2 forbid `\n` in header values (RFC 9110 §5.5)
       // so the realistic requestId attack vector is `=` and `"`, not `\n`.
       const hostileRequestId = 'req"abc=injected';

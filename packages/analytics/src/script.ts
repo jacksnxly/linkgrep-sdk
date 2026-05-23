@@ -1,4 +1,4 @@
-import { init, getClickId, type LinkgrepBrowserAnalyticsOptions } from "./core.js";
+import { getClickId, init, type LinkgrepBrowserAnalyticsOptions } from "./core.js";
 
 declare global {
   interface Window {

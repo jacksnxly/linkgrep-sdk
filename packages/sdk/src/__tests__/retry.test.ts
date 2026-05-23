@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { withRetry } from "../http/retry.js";
 import { LinkgrepError, RateLimitError } from "../http/errors.js";
+import { withRetry } from "../http/retry.js";
 
 describe("withRetry", () => {
   it("retries on 429 up to 3 times and succeeds on 3rd attempt", async () => {
@@ -113,14 +113,18 @@ describe("withRetry", () => {
   // intent and burns the budget.
   it("does not retry on AbortError (user cancellation)", async () => {
     const err = new DOMException("Aborted", "AbortError");
-    const fn = vi.fn(async () => { throw err; });
+    const fn = vi.fn(async () => {
+      throw err;
+    });
     await expect(withRetry(fn, 3)).rejects.toBe(err);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry on TimeoutError (AbortSignal.timeout)", async () => {
     const err = new DOMException("Request timed out", "TimeoutError");
-    const fn = vi.fn(async () => { throw err; });
+    const fn = vi.fn(async () => {
+      throw err;
+    });
     await expect(withRetry(fn, 3)).rejects.toBe(err);
     expect(fn).toHaveBeenCalledTimes(1);
   });
@@ -168,9 +172,7 @@ describe("withRetry", () => {
   it("respects totalBudgetMs and throws lastError before the next sleep would exceed the cap", async () => {
     vi.useFakeTimers();
     try {
-      let attempts = 0;
       const fn = vi.fn(async () => {
-        attempts++;
         throw new RateLimitError({
           status: 429,
           code: "rate_limited",
@@ -181,7 +183,7 @@ describe("withRetry", () => {
         });
       });
 
-      const p = withRetry(fn, { maxAttempts: 5, totalBudgetMs: 2000 }).catch(e => e);
+      const p = withRetry(fn, { maxAttempts: 5, totalBudgetMs: 2000 }).catch((e) => e);
 
       // First attempt fires immediately; the next sleep would be ≥10s
       // (Retry-After: 10 + floorJitter), well past the 2s budget. The
@@ -254,13 +256,17 @@ describe("withRetry", () => {
     const start = Date.now();
     let caught: unknown;
     try {
-      await withRetry(fn, {
-        maxAttempts: 3,
-        baseDelayMs: 500,
-        maxBackoffMs: 1000,
-        // Test observation seam — accepted by InternalRetryOptions only.
-        onSleep: (ms) => recordedSleeps.push(ms),
-      }, ac.signal);
+      await withRetry(
+        fn,
+        {
+          maxAttempts: 3,
+          baseDelayMs: 500,
+          maxBackoffMs: 1000,
+          // Test observation seam — accepted by InternalRetryOptions only.
+          onSleep: (ms) => recordedSleeps.push(ms),
+        },
+        ac.signal,
+      );
     } catch (e) {
       caught = e;
     }
@@ -287,9 +293,7 @@ describe("withRetry", () => {
   // Fix: use `>=` so the boundary throws to the caller (who already has
   // err.retryAfter available and can schedule its own retry).
   it("throws when server Retry-After equals maxRetryAfterMs (boundary, refuses to wedge)", async () => {
-    let attempts = 0;
     const fn = vi.fn(async () => {
-      attempts++;
       throw new RateLimitError({
         status: 429,
         code: "rate_limited",

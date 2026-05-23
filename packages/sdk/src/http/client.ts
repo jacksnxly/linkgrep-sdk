@@ -1,5 +1,10 @@
-import { LinkgrepError, LinkgrepNetworkError, isTerminalTransportError, parseErrorResponse } from "./errors.js";
-import { withRetry, type RetryOptions } from "./retry.js";
+import {
+  isTerminalTransportError,
+  LinkgrepError,
+  LinkgrepNetworkError,
+  parseErrorResponse,
+} from "./errors.js";
+import { type RetryOptions, withRetry } from "./retry.js";
 
 /**
  * Pluggable fetch implementation. Defaults to `globalThis.fetch`. Supply your
@@ -112,7 +117,11 @@ export async function readJsonWithByteCap(res: Response, capBytes: number): Prom
     // Non-JSON 200 body — surface as a network error rather than null. A
     // server returning malformed JSON is a real, observable defect; null
     // would silently cascade through `parsed as T` as if it succeeded.
-    throw new LinkgrepNetworkError("network", `non-JSON response body: ${e instanceof Error ? e.message : String(e)}`, e);
+    throw new LinkgrepNetworkError(
+      "network",
+      `non-JSON response body: ${e instanceof Error ? e.message : String(e)}`,
+      e,
+    );
   }
 }
 
@@ -160,7 +169,11 @@ export class HttpClient {
         // Honor an already-aborted caller signal pre-flight; per WHATWG
         // DOM, addEventListener("abort") does NOT fire for signals that
         // are already aborted.
-        throw new LinkgrepNetworkError("abort", "caller AbortSignal was already aborted", this.callerSignal.reason);
+        throw new LinkgrepNetworkError(
+          "abort",
+          "caller AbortSignal was already aborted",
+          this.callerSignal.reason,
+        );
       }
       const perAttemptTimeout = AbortSignal.timeout(this.timeoutMs);
       const signals: AbortSignal[] = [perAttemptTimeout];
@@ -246,4 +259,3 @@ export class HttpClient {
     }
   }
 }
-

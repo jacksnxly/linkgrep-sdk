@@ -1,11 +1,11 @@
-import { createAuthMiddleware } from "better-auth/api";
 import type { BetterAuthPlugin } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import {
+  DEFAULT_CLICK_ID_COOKIE,
+  formatTrackError,
   type Linkgrep,
   type LinkgrepError,
   type LinkgrepNetworkError,
-  DEFAULT_CLICK_ID_COOKIE,
-  formatTrackError,
 } from "linkgrep";
 
 export interface LinkgrepBetterAuthOptions {
@@ -40,10 +40,7 @@ const DEFAULT_PATHS: readonly string[] = [
   "/sign-in/magic-link",
 ];
 
-export function matchesPath(
-  path: string,
-  patterns: readonly string[],
-): boolean {
+export function matchesPath(path: string, patterns: readonly string[]): boolean {
   for (const p of patterns) {
     if (p.endsWith("/")) {
       if (path.startsWith(p)) return true;
@@ -54,9 +51,7 @@ export function matchesPath(
   return false;
 }
 
-export function linkgrepAnalytics(
-  opts: LinkgrepBetterAuthOptions,
-): BetterAuthPlugin {
+export function linkgrepAnalytics(opts: LinkgrepBetterAuthOptions): BetterAuthPlugin {
   const cookieName = opts.cookieName ?? DEFAULT_CLICK_ID_COOKIE;
   const eventName = opts.eventName ?? "Sign Up";
   const paths = opts.paths ?? DEFAULT_PATHS;
@@ -66,8 +61,7 @@ export function linkgrepAnalytics(
     hooks: {
       after: [
         {
-          matcher: (ctx) =>
-            typeof ctx.path === "string" && matchesPath(ctx.path, paths),
+          matcher: (ctx) => typeof ctx.path === "string" && matchesPath(ctx.path, paths),
           handler: createAuthMiddleware(async (ctx) => {
             const newUser = ctx.context.newSession?.user;
             // Only fire on endpoints that produced a new session (sign-up,

@@ -14,7 +14,7 @@ export function getCookieValue(name: string): string | undefined {
   // produce non-canonical input the browser may surface back verbatim. Use
   // /;\s*/ to robustly handle either case — same pattern as the server-side
   // filterCookieHeader in examples/sveltekit-better-auth-stripe/src/hooks.server.ts.
-  const row = document.cookie.split(/;\s*/).find(r => r.startsWith(prefix));
+  const row = document.cookie.split(/;\s*/).find((r) => r.startsWith(prefix));
   return row?.slice(prefix.length);
 }
 

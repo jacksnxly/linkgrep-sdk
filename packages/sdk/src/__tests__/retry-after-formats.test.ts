@@ -1,8 +1,8 @@
+import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
-import { http, HttpResponse } from "msw";
-import { server } from "./msw-server.js";
 import { parseErrorResponse, RateLimitError } from "../http/errors.js";
 import { withRetry } from "../http/retry.js";
+import { server } from "./msw-server.js";
 
 // vitest.config.ts:8-12 documents that all SDK test files share a single
 // MSW setupServer instance (msw-server.ts), with lifecycle hooks owned by
@@ -69,12 +69,12 @@ describe("parseErrorResponse — Retry-After dual format (#I3a)", () => {
   // Each of these must now return undefined so the value cannot leak through
   // the public RateLimitError.retryAfter as a misleading number.
   it.each([
-    ["-5",   "negative integer"],
+    ["-5", "negative integer"],
     ["13.5", "decimal"],
     ["0x10", "hexadecimal literal"],
-    ["1e3",  "scientific notation"],
-    ["   ",  "whitespace-only"],
-    ["+12",  "explicit plus sign"],
+    ["1e3", "scientific notation"],
+    ["   ", "whitespace-only"],
+    ["+12", "explicit plus sign"],
   ])("rejects %s (%s) per RFC 9110 §10.2.3", async (header) => {
     server.use(
       http.post(`${BASE}/probe`, () =>
@@ -244,12 +244,18 @@ describe("withRetry — jitter on Retry-After floor (#I3c)", () => {
       const min = Math.min(...recordedSleeps);
       const max = Math.max(...recordedSleeps);
       const spread = max - min;
-      expect(min, "every sleep must respect the 1000 ms server-supplied floor").toBeGreaterThanOrEqual(1000);
+      expect(
+        min,
+        "every sleep must respect the 1000 ms server-supplied floor",
+      ).toBeGreaterThanOrEqual(1000);
       // Pre-fix bound: spread ≤ 100 ms (Math.min(1000, retryAfterMs*0.1) = 100).
       // Post-fix bound: spread ~Math.max(2000, retryAfterMs*0.5) = 2000 ms.
       // Assert ≥ 1500 ms with safety margin; the floor is 2000 so the spread
       // across 100 samples is overwhelmingly likely to exceed 1500 ms.
-      expect(spread, "jitter spread must exceed 1.5 s to break recovery-instant synchronization").toBeGreaterThan(1500);
+      expect(
+        spread,
+        "jitter spread must exceed 1.5 s to break recovery-instant synchronization",
+      ).toBeGreaterThan(1500);
     } finally {
       vi.useRealTimers();
       vi.restoreAllMocks();

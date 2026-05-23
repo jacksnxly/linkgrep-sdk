@@ -1,11 +1,11 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { getCookieValue, setCookie } from "../cookie.js";
 
 describe("cookie utilities", () => {
   beforeEach(() => {
     // clear all cookies between tests
-    document.cookie.split(";").forEach(c => {
-      document.cookie = c.trim().split("=")[0] + "=;Max-Age=0;Path=/";
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = `${c.trim().split("=")[0]}=;Max-Age=0;Path=/`;
     });
   });
 
@@ -46,8 +46,12 @@ describe("cookie utilities", () => {
     }
     if (!original) throw new Error("cookie descriptor not found");
     Object.defineProperty(document, "cookie", {
-      get() { return "a=1;b=2;lgr_id=nospace"; },
-      set() { /* ignored for this test */ },
+      get() {
+        return "a=1;b=2;lgr_id=nospace";
+      },
+      set() {
+        /* ignored for this test */
+      },
       configurable: true,
     });
     try {
@@ -72,8 +76,13 @@ describe("cookie utilities", () => {
     }
     if (!original || !proto) throw new Error("cookie descriptor not found");
     Object.defineProperty(document, "cookie", {
-      set(v: string) { writes.push(v); original!.set?.call(this, v); },
-      get() { return original!.get?.call(this) ?? ""; },
+      set(v: string) {
+        writes.push(v);
+        original!.set?.call(this, v);
+      },
+      get() {
+        return original!.get?.call(this) ?? "";
+      },
       configurable: true,
     });
 
@@ -84,9 +93,9 @@ describe("cookie utilities", () => {
     try {
       setCookie("lg_click_id", "abc", { domain: ".athenum.xyz", sameSite: "Lax", secure: true });
 
-      expect(writes.some(w => w.includes("Domain=.athenum.xyz"))).toBe(true);
-      expect(writes.some(w => w.includes("SameSite=Lax"))).toBe(true);
-      expect(writes.some(w => w.includes("Secure"))).toBe(true);
+      expect(writes.some((w) => w.includes("Domain=.athenum.xyz"))).toBe(true);
+      expect(writes.some((w) => w.includes("SameSite=Lax"))).toBe(true);
+      expect(writes.some((w) => w.includes("Secure"))).toBe(true);
     } finally {
       Object.defineProperty(document, "cookie", original!);
     }

@@ -1,4 +1,4 @@
-import { HttpClient, type Fetcher } from "./http/client.js";
+import { type Fetcher, HttpClient } from "./http/client.js";
 import type { RetryOptions } from "./http/retry.js";
 import { TrackNamespace } from "./track/index.js";
 

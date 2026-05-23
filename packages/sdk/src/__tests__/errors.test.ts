@@ -1,19 +1,18 @@
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { http, HttpResponse } from "msw";
-import { server } from "./msw-server.js";
 import {
+  AuthenticationError,
+  BadRequestError,
+  GoneError,
+  InternalServerError,
   Linkgrep,
   LinkgrepError,
-  BadRequestError,
-  AuthenticationError,
-  PermissionError,
   NotFoundError,
-  ConflictError,
-  GoneError,
-  UnprocessableEntityError,
+  PermissionError,
   RateLimitError,
-  InternalServerError,
+  UnprocessableEntityError,
 } from "../index.js";
+import { server } from "./msw-server.js";
 
 const BASE = "https://api.linkgrep.xyz";
 
@@ -89,7 +88,11 @@ describe("error parsing", () => {
 
       const linkgrep = makeClient();
       try {
-        await linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" });
+        await linkgrep.track.lead({
+          clickId: "fake",
+          eventName: "Sign Up",
+          customerExternalId: "u1",
+        });
         throw new Error(`Expected throw for status ${status}`);
       } catch (err) {
         expect(err).toBeInstanceOf(Ctor);
@@ -114,7 +117,11 @@ describe("error parsing", () => {
 
     const linkgrep = makeClient();
     try {
-      await linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" });
+      await linkgrep.track.lead({
+        clickId: "fake",
+        eventName: "Sign Up",
+        customerExternalId: "u1",
+      });
       throw new Error("Expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(RateLimitError);
@@ -124,24 +131,30 @@ describe("error parsing", () => {
 
   it("falls back to RFC 9457 problem+json shape when Content-Type signals it", async () => {
     server.use(
-      http.post(`${BASE}/api/track/lead`, () =>
-        new HttpResponse(
-          JSON.stringify({
-            type: "https://example.com/problems/expired-click",
-            title: "Click expired",
-            detail: "Click is outside the 30-day attribution window",
-          }),
-          {
-            status: 410,
-            headers: { "content-type": "application/problem+json" },
-          },
-        ),
+      http.post(
+        `${BASE}/api/track/lead`,
+        () =>
+          new HttpResponse(
+            JSON.stringify({
+              type: "https://example.com/problems/expired-click",
+              title: "Click expired",
+              detail: "Click is outside the 30-day attribution window",
+            }),
+            {
+              status: 410,
+              headers: { "content-type": "application/problem+json" },
+            },
+          ),
       ),
     );
 
     const linkgrep = makeClient();
     try {
-      await linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" });
+      await linkgrep.track.lead({
+        clickId: "fake",
+        eventName: "Sign Up",
+        customerExternalId: "u1",
+      });
       throw new Error("Expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(LinkgrepError);
@@ -162,7 +175,11 @@ describe("error parsing", () => {
 
     const linkgrep = makeClient();
     try {
-      await linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" });
+      await linkgrep.track.lead({
+        clickId: "fake",
+        eventName: "Sign Up",
+        customerExternalId: "u1",
+      });
       throw new Error("Expected throw");
     } catch (err) {
       expect(err).toBeInstanceOf(LinkgrepError);
@@ -222,7 +239,11 @@ describe("error parsing", () => {
 
     const linkgrep = makeClient();
     try {
-      await linkgrep.track.lead({ clickId: "fake", eventName: "Sign Up", customerExternalId: "u1" });
+      await linkgrep.track.lead({
+        clickId: "fake",
+        eventName: "Sign Up",
+        customerExternalId: "u1",
+      });
       throw new Error("Expected throw");
     } catch (err) {
       const e = err as LinkgrepError;

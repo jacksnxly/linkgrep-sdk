@@ -1,7 +1,13 @@
+import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { http, HttpResponse } from "msw";
+import {
+  InternalServerError,
+  Linkgrep,
+  LinkgrepNetworkError,
+  NotFoundError,
+  type Result,
+} from "../index.js";
 import { server } from "./msw-server.js";
-import { Linkgrep, NotFoundError, InternalServerError, LinkgrepNetworkError, type Result } from "../index.js";
 
 const BASE = "https://api.linkgrep.xyz";
 
@@ -100,11 +106,7 @@ describe(".safe() variants", () => {
   });
 
   it("track.sale.safe surfaces 409 as { ok: true, data: { duplicate: true } } (NOT an error)", async () => {
-    server.use(
-      http.post(`${BASE}/api/track/sale`, () =>
-        new HttpResponse(null, { status: 409 }),
-      ),
-    );
+    server.use(http.post(`${BASE}/api/track/sale`, () => new HttpResponse(null, { status: 409 })));
 
     const linkgrep = new Linkgrep({ token: "k", baseUrl: BASE });
     const result = await linkgrep.track.sale.safe({
@@ -154,9 +156,7 @@ describe(".safe() variants", () => {
   });
 
   it("track.sale.safe wraps network errors as LinkgrepNetworkError (does NOT throw)", async () => {
-    server.use(
-      http.post(`${BASE}/api/track/sale`, () => HttpResponse.error()),
-    );
+    server.use(http.post(`${BASE}/api/track/sale`, () => HttpResponse.error()));
 
     const linkgrep = new Linkgrep({ token: "k", baseUrl: BASE });
     const result = await linkgrep.track.sale.safe({

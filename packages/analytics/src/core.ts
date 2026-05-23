@@ -1,11 +1,11 @@
-import { setCookie, getCookieValue } from "./cookie.js";
 // Deep subpath import (`linkgrep/protocol` — Node.js exports-field
 // encapsulation) so this browser bundle never crosses into the SDK's
 // http/client.ts module-level `new TextDecoder()` side effect. The barrel
 // `"linkgrep"` would drag that allocation into the CDN-served IIFE even
 // though analytics never calls it. Keryx 2026-05-23, finding #1.
 //   https://nodejs.org/api/packages.html#subpath-exports
-import { DEFAULT_CLICK_ID_COOKIE, CLICK_ID_PATTERN } from "linkgrep/protocol";
+import { CLICK_ID_PATTERN, DEFAULT_CLICK_ID_COOKIE } from "linkgrep/protocol";
+import { getCookieValue, setCookie } from "./cookie.js";
 
 export interface LinkgrepBrowserAnalyticsOptions {
   /** Cookie Domain attribute for cross-subdomain attribution (e.g. ".example.com"). */

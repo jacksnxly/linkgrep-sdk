@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
 
 // Bundle-size + symbol-blocklist guard for the CDN-served IIFE.
 //
@@ -33,8 +33,13 @@ describe("CDN IIFE bundle guard", () => {
 
   it("does not pull in fetch/JSON.parse/RESPONSE_DECODER from the SDK barrel", () => {
     const content = readFileSync(SCRIPT_PATH, "utf8");
-    expect(content, "fetch is server-side; the IIFE has no business calling it").not.toMatch(/\bfetch\s*\(/);
-    expect(content, "JSON.parse on the browser path is a smell — analytics writes cookies only").not.toMatch(/JSON\.parse/);
+    expect(content, "fetch is server-side; the IIFE has no business calling it").not.toMatch(
+      /\bfetch\s*\(/,
+    );
+    expect(
+      content,
+      "JSON.parse on the browser path is a smell — analytics writes cookies only",
+    ).not.toMatch(/JSON\.parse/);
   });
 
   it("stays under 1500 bytes (current baseline ~1153 bytes)", () => {

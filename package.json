@@ -5,12 +5,16 @@
   "scripts": {
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "turbo lint",
+    "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
+    "lint": "biome check",
+    "format": "biome check --write",
+    "check": "biome check && pnpm typecheck && pnpm test",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "turbo build && changeset publish"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@changesets/cli": "^2.28.1",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0",

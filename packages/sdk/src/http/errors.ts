@@ -228,7 +228,9 @@ export class LinkgrepNetworkError extends Error {
 // the `_exhaustive: never` assignment below fails to compile. Canonical
 // pattern from the TypeScript handbook (Narrowing → Exhaustiveness checking).
 {
-  const _exhaustiveOnKind = (k: LinkgrepNetworkErrorKind): "timeout" | "abort" | "oversize" | "network" => {
+  const _exhaustiveOnKind = (
+    k: LinkgrepNetworkErrorKind,
+  ): "timeout" | "abort" | "oversize" | "network" => {
     switch (k) {
       case "timeout":
         return "timeout";
@@ -322,7 +324,10 @@ export function parseErrorResponse(res: Response, body: unknown): LinkgrepError 
     case 429: {
       // RFC 9110 §10.2.3: Retry-After = HTTP-date / delay-seconds.
       // https://datatracker.ietf.org/doc/html/rfc9110#section-10.2.3
-      return new RateLimitError({ ...init, retryAfter: parseRetryAfter(res.headers.get("retry-after")) });
+      return new RateLimitError({
+        ...init,
+        retryAfter: parseRetryAfter(res.headers.get("retry-after")),
+      });
     }
     case 500:
       return new InternalServerError(init);
@@ -378,9 +383,7 @@ function parseRetryAfter(raw: string | null): number | undefined {
  * variants return `Result<T, E>` and never throw. Pattern matches Speakeasy
  * generated SDKs and Effect-TS Result.
  */
-export type Result<T, E = LinkgrepError> =
-  | { ok: true; data: T }
-  | { ok: false; error: E };
+export type Result<T, E = LinkgrepError> = { ok: true; data: T } | { ok: false; error: E };
 
 /**
  * Map 409 Conflict into a `{ duplicate: true }` sentinel for endpoints whose
@@ -399,9 +402,7 @@ export type Result<T, E = LinkgrepError> =
  * `TrackLeadResult` / `TrackSaleResult` already-translated and narrow via
  * `"duplicate" in r`. Keryx 2026-05-23 review, finding #7.
  */
-export function mapConflict<T>(
-  p: Promise<T>,
-): Promise<T | { duplicate: true }> {
+export function mapConflict<T>(p: Promise<T>): Promise<T | { duplicate: true }> {
   return p.catch((e: unknown) => {
     if (e instanceof ConflictError) return { duplicate: true } as const;
     throw e;
@@ -443,7 +444,10 @@ export function mapConflict<T>(
  * before the `parsed as TrackXxxResponse` cast in each translator and is
  * not meant to be called by consumers. Keryx 2026-05-23 review, finding #7.
  */
-export function assertResponseObject(parsed: unknown, endpoint: string): asserts parsed is Record<string, unknown> {
+export function assertResponseObject(
+  parsed: unknown,
+  endpoint: string,
+): asserts parsed is Record<string, unknown> {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new LinkgrepNetworkError(
       "network",

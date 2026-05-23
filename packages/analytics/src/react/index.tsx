@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { init } from "../core.js";
 import type { LinkgrepBrowserAnalyticsOptions } from "../core.js";
+import { init } from "../core.js";
 
 /**
  * Mount-once analytics initializer. Reads the click-ID from the URL and

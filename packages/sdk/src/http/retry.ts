@@ -1,4 +1,9 @@
-import { LinkgrepError, LinkgrepNetworkError, RateLimitError, isTerminalTransportError } from "./errors.js";
+import {
+  isTerminalTransportError,
+  LinkgrepError,
+  LinkgrepNetworkError,
+  RateLimitError,
+} from "./errors.js";
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -89,7 +94,11 @@ export async function withRetry<T>(
   // the "check-then-listen" pattern.
   //   https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/aborted
   if (callerSignal?.aborted) {
-    throw new LinkgrepNetworkError("abort", "caller AbortSignal was already aborted", callerSignal.reason);
+    throw new LinkgrepNetworkError(
+      "abort",
+      "caller AbortSignal was already aborted",
+      callerSignal.reason,
+    );
   }
   // Back-compat: old signature accepted a bare `maxAttempts` number.
   const opts =
@@ -139,7 +148,11 @@ export async function withRetry<T>(
       // Architecture Blog — "Exponential Backoff And Jitter"). Using `>=`
       // closes that boundary by throwing to the caller (keryx 2026-05-23,
       // finding #5).
-      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 >= maxRetryAfterMs) {
+      if (
+        err instanceof RateLimitError &&
+        err.retryAfter !== undefined &&
+        err.retryAfter * 1000 >= maxRetryAfterMs
+      ) {
         throw err;
       }
       lastError = err;
@@ -151,7 +164,7 @@ export async function withRetry<T>(
         // 2^N * baseDelayMs blow-up that the `maxRetryAfterMs` knob does
         // NOT constrain (that one applies only to server-supplied
         // Retry-After).
-        const base = Math.min(Math.pow(2, attempt) * baseDelayMs, maxBackoffMs);
+        const base = Math.min(2 ** attempt * baseDelayMs, maxBackoffMs);
         const jitter = base * (0.8 + Math.random() * 0.4);
 
         // When honoring Retry-After, add additive jitter so concurrent clients
@@ -173,10 +186,7 @@ export async function withRetry<T>(
           // Clamp post-jitter to maxRetryAfterMs so the documented cap holds
           // end-to-end. Without this clamp, retryAfter at exactly the cap +
           // worst-case jitter could sleep ~1s past the cap.
-          sleepMs = Math.min(
-            Math.max(retryAfterMs + floorJitter, jitter),
-            maxRetryAfterMs,
-          );
+          sleepMs = Math.min(Math.max(retryAfterMs + floorJitter, jitter), maxRetryAfterMs);
         } else {
           // Non-Retry-After backoff: clamp the jittered exponential to
           // maxBackoffMs (the upper jitter band can exceed the unjittered
@@ -224,7 +234,13 @@ export async function withRetry<T>(
           }, sleepMs);
           const onAbort = () => {
             clearTimeout(timerId);
-            reject(new LinkgrepNetworkError("abort", "caller AbortSignal fired during retry backoff", callerSignal!.reason));
+            reject(
+              new LinkgrepNetworkError(
+                "abort",
+                "caller AbortSignal fired during retry backoff",
+                callerSignal!.reason,
+              ),
+            );
           };
           if (callerSignal) {
             callerSignal.addEventListener("abort", onAbort, { once: true });

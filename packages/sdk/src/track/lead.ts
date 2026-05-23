@@ -1,17 +1,13 @@
 import type { HttpClient } from "../http/client.js";
-import type {
-  TrackLeadInput,
-  TrackLeadResponse,
-  TrackLeadWire,
-} from "../types.js";
 import {
   assertResponseObject,
-  mapConflict,
-  toResult,
   type LinkgrepError,
   type LinkgrepNetworkError,
+  mapConflict,
   type Result,
+  toResult,
 } from "../http/errors.js";
+import type { TrackLeadInput, TrackLeadResponse, TrackLeadWire } from "../types.js";
 
 /**
  * Track.lead result is a discriminated union: the server's `TrackLeadResponse`

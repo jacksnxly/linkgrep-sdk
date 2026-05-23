@@ -1,15 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
-import { http, HttpResponse } from "msw";
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import {
-  Linkgrep,
-  LinkgrepError,
-  LinkgrepNetworkError,
-  type RetryOptions,
-} from "linkgrep";
-import { server } from "./msw-server.js";
+import { Linkgrep, LinkgrepError, type LinkgrepNetworkError, type RetryOptions } from "linkgrep";
+import { HttpResponse, http } from "msw";
+import { describe, expect, it, vi } from "vitest";
 import { linkgrepAnalytics, matchesPath } from "../plugin.js";
+import { server } from "./msw-server.js";
 
 const BASE = "https://api.linkgrep.xyz";
 
@@ -161,20 +156,22 @@ describe("linkgrepAnalytics plugin", () => {
 describe("I-10: failure path preserves rich LinkgrepError diagnostic", () => {
   it("invokes onError with the full LinkgrepError (code, status, requestId, docUrl)", async () => {
     server.use(
-      http.post(`${BASE}/api/track/lead`, () =>
-        new HttpResponse(
-          JSON.stringify({
-            error: {
-              code: "internal_error",
-              message: "downstream attribution service unavailable",
-              doc_url: "https://docs.linkgrep.xyz/errors/internal-error",
+      http.post(
+        `${BASE}/api/track/lead`,
+        () =>
+          new HttpResponse(
+            JSON.stringify({
+              error: {
+                code: "internal_error",
+                message: "downstream attribution service unavailable",
+                doc_url: "https://docs.linkgrep.xyz/errors/internal-error",
+              },
+            }),
+            {
+              status: 500,
+              headers: { "content-type": "application/json", "x-request-id": "req_abc123" },
             },
-          }),
-          {
-            status: 500,
-            headers: { "content-type": "application/json", "x-request-id": "req_abc123" },
-          },
-        ),
+          ),
       ),
     );
 

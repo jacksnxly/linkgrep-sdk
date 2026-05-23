@@ -1,9 +1,9 @@
+import { HttpResponse, http as mswHttp } from "msw";
 import { describe, expect, it } from "vitest";
-import { http as mswHttp, HttpResponse } from "msw";
-import { server } from "./msw-server.js";
-import { Linkgrep } from "../linkgrep.js";
-import { LinkgrepNetworkError } from "../http/errors.js";
 import { readJsonWithByteCap } from "../http/client.js";
+import { LinkgrepNetworkError } from "../http/errors.js";
+import { Linkgrep } from "../linkgrep.js";
+import { server } from "./msw-server.js";
 
 const BASE = "https://api.example.test";
 
@@ -15,16 +15,18 @@ const BASE = "https://api.example.test";
 describe("HttpClient — response-size guard (P4)", () => {
   it("rejects success response when Content-Length exceeds 1 MiB cap", async () => {
     server.use(
-      mswHttp.post(`${BASE}/api/track/lead`, () =>
-        // Tell the client the body is 2 MiB; we don't actually send 2 MiB
-        // because the SDK should reject BEFORE calling .json().
-        new HttpResponse(JSON.stringify({ customerId: "c_1" }), {
-          status: 200,
-          headers: {
-            "content-type": "application/json",
-            "content-length": String(2 * 1024 * 1024),
-          },
-        }),
+      mswHttp.post(
+        `${BASE}/api/track/lead`,
+        () =>
+          // Tell the client the body is 2 MiB; we don't actually send 2 MiB
+          // because the SDK should reject BEFORE calling .json().
+          new HttpResponse(JSON.stringify({ customerId: "c_1" }), {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "content-length": String(2 * 1024 * 1024),
+            },
+          }),
       ),
     );
 
@@ -42,14 +44,16 @@ describe("HttpClient — response-size guard (P4)", () => {
 
   it("rejects error response when Content-Length exceeds 1 MiB cap", async () => {
     server.use(
-      mswHttp.post(`${BASE}/api/track/lead`, () =>
-        new HttpResponse(JSON.stringify({ error: { code: "internal_error", message: "boom" } }), {
-          status: 500,
-          headers: {
-            "content-type": "application/json",
-            "content-length": String(2 * 1024 * 1024),
-          },
-        }),
+      mswHttp.post(
+        `${BASE}/api/track/lead`,
+        () =>
+          new HttpResponse(JSON.stringify({ error: { code: "internal_error", message: "boom" } }), {
+            status: 500,
+            headers: {
+              "content-type": "application/json",
+              "content-length": String(2 * 1024 * 1024),
+            },
+          }),
       ),
     );
 
@@ -85,7 +89,6 @@ describe("HttpClient — response-size guard (P4)", () => {
     if ("duplicate" in result) throw new Error("expected non-duplicate result");
     expect(result.customerId).toBe("c_ok");
   });
-
 });
 
 // Regression for keryx P4b (validated 2026-05-22): the size cap MUST hold
@@ -108,7 +111,10 @@ describe("readJsonWithByteCap — streaming guard (keryx P4b)", () => {
     let offset = 0;
     const stream = new ReadableStream({
       pull(controller) {
-        if (offset >= payload.length) { controller.close(); return; }
+        if (offset >= payload.length) {
+          controller.close();
+          return;
+        }
         controller.enqueue(enc.encode(payload.slice(offset, offset + CHUNK)));
         offset += CHUNK;
       },
@@ -143,7 +149,11 @@ describe("readJsonWithByteCap — streaming guard (keryx P4b)", () => {
   });
 
   it("returns null for empty body", async () => {
-    const stream = new ReadableStream({ start(c) { c.close(); } });
+    const stream = new ReadableStream({
+      start(c) {
+        c.close();
+      },
+    });
     const res = new Response(stream, { status: 200 });
     const parsed = await readJsonWithByteCap(res, 1024 * 1024);
     expect(parsed).toBeNull();
