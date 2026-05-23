@@ -47,9 +47,15 @@ export const POST: RequestHandler = async ({ request }) => {
   // want to handle invoice.payment_succeeded too for subscription renewals.
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
-    const lgCustomerExternalId =
-      (session.metadata?.lgCustomerExternalId as string | undefined) ??
-      (session.client_reference_id as string | undefined);
+    // Stripe types: `metadata: Stripe.Metadata | null` where `Metadata` is
+    // `{[k: string]: string}`, and `client_reference_id: string | null`.
+    // Both can be falsy via `null` (not just `undefined`); the chained `??`
+    // coalesces both. No casts needed — the pre-fix `as string | undefined`
+    // lied about null vs undefined (keryx 2026-05-23, finding M3).
+    const lgCustomerExternalId: string | undefined =
+      session.metadata?.lgCustomerExternalId ??
+      session.client_reference_id ??
+      undefined;
     // Stripe Checkout sessions in subscription mode populate `amount_total`
     // and `currency` after the session completes. The session's `id` is a
     // stable idempotency key — track.sale uses `invoiceId` as its Redis-NX
