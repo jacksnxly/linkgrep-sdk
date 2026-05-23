@@ -4,8 +4,8 @@ import {
   type Linkgrep,
   type LinkgrepError,
   type LinkgrepNetworkError,
-  LinkgrepError as LinkgrepErrorClass,
   DEFAULT_CLICK_ID_COOKIE,
+  formatTrackError,
 } from "linkgrep";
 
 export interface LinkgrepBetterAuthOptions {
@@ -105,26 +105,19 @@ export function linkgrepAnalytics(
                 .then((result) => {
                   if (!result.ok) {
                     // Pre-fix (keryx I-10), only `error.message` survived the
-                    // log line. The SDK invested in a rich error shape
+                    // log line. The SDK invests in a rich error shape
                     // (`code`, `status`, `requestId`, `docUrl` for
-                    // LinkgrepError; `kind` for LinkgrepNetworkError); the
-                    // plugin now either delegates the full event to a host
+                    // LinkgrepError; `kind` for LinkgrepNetworkError); this
+                    // plugin either delegates the full event to a host
                     // `onError` callback (Sentry / Datadog / Honeycomb) or
-                    // emits a structured console line that preserves the
-                    // operational fields.
+                    // emits the SDK's canonical structured-log line via
+                    // `formatTrackError` (single source of truth across
+                    // plugin + example apps — keryx 2026-05-23, finding #7).
                     if (opts.onError) {
                       opts.onError(result.error);
                       return;
                     }
-                    if (result.error instanceof LinkgrepErrorClass) {
-                      console.warn(
-                        `[linkgrep] track.lead failed: code=${result.error.code} status=${result.error.status} requestId=${result.error.requestId ?? "-"} docUrl=${result.error.docUrl ?? "-"} message=${result.error.message}`,
-                      );
-                    } else {
-                      console.warn(
-                        `[linkgrep] track.lead transport failure: kind=${result.error.kind} message=${result.error.message}`,
-                      );
-                    }
+                    console.warn(formatTrackError("track.lead", result.error));
                   }
                 }),
             );

@@ -1,4 +1,4 @@
-import { Linkgrep, LinkgrepError } from "linkgrep";
+import { Linkgrep, LinkgrepError, LinkgrepNetworkError, formatTrackError } from "linkgrep";
 import { env } from "$env/dynamic/private";
 
 // Single composition root for the linkgrep SDK in this example app.
@@ -27,20 +27,21 @@ export function getLinkgrep(): Linkgrep {
 }
 
 // Shared structured-log shape for failed track.lead / track.sale calls.
-// Mirrors the structured-error shape that @linkgrep/better-auth ships
-// natively (packages/better-auth/src/plugin.ts:119-127). Both the
-// webhook handler and any future track callers route through this so
-// the demo demonstrates one consistent logging idiom.
+// Delegates the LinkgrepError / LinkgrepNetworkError formatting to the
+// SDK's canonical `formatTrackError` helper so the plugin's onError
+// fallback (packages/better-auth/src/plugin.ts) and every example /
+// host integration emit the exact same key=value shape — no per-app
+// field drift. (Keryx 2026-05-23, finding #7: the previous inline
+// formatter here had silently dropped `docUrl`.)
+//
+// The `unknown` fallback below handles the rare case where the .safe()
+// contract is violated by a programming bug in mapConflict / future
+// code paths — the SDK's catch block in errors.ts:toResult already
+// .from()-wraps unknown rejections, so this branch is defensive
+// rather than expected.
 export function logTrackError(prefix: string, error: unknown): void {
-  if (error instanceof LinkgrepError) {
-    console.warn(
-      `[linkgrep] ${prefix} failed: code=${error.code} status=${error.status} requestId=${error.requestId ?? "-"} message=${error.message}`,
-    );
-    return;
-  }
-  if (error && typeof error === "object" && "kind" in error && "message" in error) {
-    const e = error as { kind: string; message: string };
-    console.warn(`[linkgrep] ${prefix} transport failure: kind=${e.kind} message=${e.message}`);
+  if (error instanceof LinkgrepError || error instanceof LinkgrepNetworkError) {
+    console.warn(formatTrackError(prefix, error));
     return;
   }
   const message = error instanceof Error ? error.message : String(error);

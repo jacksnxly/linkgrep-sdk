@@ -25,3 +25,4 @@ export type {
   TrackSaleResponse,
 } from "./types.js";
 export { DEFAULT_CLICK_ID_COOKIE, CLICK_ID_PATTERN } from "./protocol.js";
+export { formatTrackError } from "./format.js";
