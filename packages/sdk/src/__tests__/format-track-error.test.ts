@@ -112,4 +112,83 @@ describe("formatTrackError — single-source structured-log shape", () => {
       expect(JSON.parse(messageValue)).toBe(originalMessage);
     });
   });
+
+  // Regression for keryx 2026-05-23 main review (validation report
+  // 2026-05-23T1224Z), finding #1: pre-fix the `message` branch was
+  // JSON-encoded but the adjacent `requestId` and `docUrl` tokens shipped
+  // unquoted. The original commit 22b9446 justified this as "URL-safe
+  // contract" — trusting the upstream Linkgrep server to send
+  // RFC-3986-compliant URLs in `doc_url`. The runtime repro at
+  // .keryx/validations/artifacts/2026-05-23T1224Z/ proved that a
+  // hostile / compromised / buggy upstream returning a `doc_url` with an
+  // embedded `\n` reproduces the EXACT logfmt-corruption pattern the
+  // `message` fix exists to prevent (\n-count=2, message=-count=2 — both
+  // invariants violated). The threat model expands: do not trust any
+  // server-controlled byte in log output, even ones nominally URL-shaped.
+  describe("logfmt safety — hostile docUrl / requestId", () => {
+    it("escapes embedded newlines and injected message= in error.docUrl", () => {
+      const hostileDocUrl =
+        "https://docs.linkgrep.xyz/foo\nfake_key=val\nmessage=stolen";
+      const err = new LinkgrepError({
+        status: 400,
+        code: "bad_request",
+        message: "real error",
+        requestId: "req_xyz",
+        docUrl: hostileDocUrl,
+        raw: null,
+        headers: new Headers(),
+      });
+      const line = formatTrackError("track.lead", err);
+      // Single-line guarantee must survive a hostile docUrl too.
+      expect((line.match(/\n/g) || []).length, "single-line").toBe(0);
+      // Exactly one `message=` token — the injected `message=stolen`
+      // payload must not surface as a foreign top-level tag.
+      expect((line.match(/message=/g) || []).length, "exactly one message=").toBe(1);
+      // Round-trip: docUrl is a JSON string carrying the verbatim original.
+      const docUrlValue = line.match(/docUrl=("(?:[^"\\]|\\.)*")/)?.[1];
+      expect(docUrlValue, "docUrl is JSON-quoted").toBeDefined();
+      expect(JSON.parse(docUrlValue!)).toBe(hostileDocUrl);
+    });
+
+    it("escapes embedded `=` and `\"` in error.requestId", () => {
+      // HTTP/1.1 + HTTP/2 forbid `\n` in header values (RFC 9110 §5.5)
+      // so the realistic requestId attack vector is `=` and `"`, not `\n`.
+      const hostileRequestId = 'req"abc=injected';
+      const err = new LinkgrepError({
+        status: 400,
+        code: "bad_request",
+        message: "real error",
+        requestId: hostileRequestId,
+        docUrl: "https://docs.linkgrep.xyz/ok",
+        raw: null,
+        headers: new Headers(),
+      });
+      const line = formatTrackError("track.lead", err);
+      // No stray quoted-pair breakage — exactly one `message=` token,
+      // and `requestId=` value round-trips under JSON.parse.
+      expect((line.match(/message=/g) || []).length).toBe(1);
+      const requestIdValue = line.match(/requestId=("(?:[^"\\]|\\.)*")/)?.[1];
+      expect(requestIdValue, "requestId is JSON-quoted").toBeDefined();
+      expect(JSON.parse(requestIdValue!)).toBe(hostileRequestId);
+    });
+
+    it("missing optional fields still render as the bare `-` sentinel", () => {
+      // The defensive quoting must NOT introduce surrounding quotes around
+      // the `-` placeholder — that would break grep tooling that filters
+      // on `requestId=-` to find calls without a request ID.
+      const err = new LinkgrepError({
+        status: 500,
+        code: "internal_error",
+        message: "boom",
+        raw: null,
+        headers: new Headers(),
+      });
+      const line = formatTrackError("track.lead", err);
+      expect(line).toContain("requestId=- ");
+      expect(line).toContain("docUrl=- ");
+      // Ensure no `requestId="-"` shape leaked through.
+      expect(line).not.toMatch(/requestId="-"/);
+      expect(line).not.toMatch(/docUrl="-"/);
+    });
+  });
 });
