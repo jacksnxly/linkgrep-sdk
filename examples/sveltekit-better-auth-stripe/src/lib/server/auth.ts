@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
+import { env } from "$env/dynamic/private";
 import { getLinkgrep } from "$lib/server/linkgrep";
 
 // Twelve-Factor "Config" — secrets live in the environment, never in
@@ -8,17 +9,28 @@ import { getLinkgrep } from "$lib/server/linkgrep";
 // root in $lib/server/linkgrep so config (token, baseUrl, retry, fetch)
 // never drifts between this module and the stripe-webhook route.
 //
+// Env access goes through `$env/dynamic/private` (SvelteKit's
+// adapter-aware runtime API) rather than raw `process.env`. Per
+// https://svelte.dev/docs/kit/$env-dynamic-private: "Dynamic environment
+// variables are defined by the platform you're running on. For example
+// if you're using adapter-node (or running vite preview), this is
+// equivalent to process.env." On serverless adapters (adapter-cloudflare,
+// adapter-vercel-edge) it is the only API that respects per-request
+// platform env — `process.env` is silently empty there. Standardizing
+// across this composition root removes a footgun for anyone porting the
+// example to a non-Node host. Keryx 2026-05-23, finding #5.
+//
 // The AUTH_SECRET gate fires lazily on first request rather than at
 // module-load time because SvelteKit's `vite build` runs the prerender
 // `analyse` step under NODE_ENV=production, which imports this module.
 // Throwing at import time would fail every CI build without secrets —
 // the build artifact is fine, only the running server needs them.
-const IS_PROD = process.env.NODE_ENV === "production";
+const IS_PROD = env.NODE_ENV === "production";
 
 let _instance: ReturnType<typeof betterAuth> | undefined;
 
 function build(): ReturnType<typeof betterAuth> {
-  const authSecret = process.env.AUTH_SECRET;
+  const authSecret = env.AUTH_SECRET;
   if (IS_PROD && !authSecret) {
     throw new Error("AUTH_SECRET is required in production");
   }
@@ -28,7 +40,7 @@ function build(): ReturnType<typeof betterAuth> {
   // (Drizzle / Kysely / Prisma) for production. See:
   // https://www.better-auth.com/docs/adapters/community-adapters
   return betterAuth({
-    baseURL: process.env.AUTH_BASE_URL ?? "http://localhost:5173",
+    baseURL: env.AUTH_BASE_URL ?? "http://localhost:5173",
     secret: authSecret ?? "demo-secret-replace-in-production-min-32",
     database: memoryAdapter({
       user: [],

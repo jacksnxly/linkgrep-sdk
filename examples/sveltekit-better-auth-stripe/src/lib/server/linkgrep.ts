@@ -12,7 +12,13 @@ import { env } from "$env/dynamic/private";
 // API key, allow demo builds to ship without secrets. The gate fires
 // lazily on first call so SvelteKit's prerender step (which imports
 // modules under NODE_ENV=production without env secrets) doesn't fail.
-const IS_PROD = process.env.NODE_ENV === "production";
+//
+// `NODE_ENV` is read through `$env/dynamic/private` for consistency with
+// the rest of this composition root (auth.ts, stripe.ts). On adapter-node
+// it is equivalent to `process.env.NODE_ENV`; on non-Node adapters it is
+// the only API that resolves correctly. Keryx 2026-05-23, finding #5.
+//   https://svelte.dev/docs/kit/$env-dynamic-private
+const IS_PROD = env.NODE_ENV === "production";
 
 let _client: Linkgrep | undefined;
 
