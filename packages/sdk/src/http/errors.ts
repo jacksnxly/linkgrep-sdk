@@ -159,6 +159,12 @@ export type LinkgrepNetworkErrorKind = (typeof NETWORK_ERROR_KINDS)[number];
  * (retry.ts, the body-reader catch in client.ts, and classify() below)
  * share one definition — adding a terminal kind only needs editing this
  * function and the kind union.
+ *
+ * @internal — used by retry.ts and client.ts within the SDK; not part of
+ * the public package barrel `linkgrep`. Mirrors the convention applied to
+ * `InternalRetryOptions` (retry.ts:50-72) and `readJsonWithByteCap`
+ * (client.ts:65). Keryx 2026-05-23 review, finding #7.
+ * https://api-extractor.com/pages/tsdoc/tag_internal/
  */
 export function isTerminalTransportError(err: unknown): boolean {
   if (err instanceof LinkgrepNetworkError) {
@@ -232,6 +238,13 @@ export class LinkgrepNetworkError extends Error {
   void _exhaustiveOnKind;
 }
 
+/**
+ * @internal — used by client.ts:208 within the SDK; not part of the
+ * public package barrel `linkgrep`. The HTTP-status → error-subclass
+ * mapping is an SDK-internal contract; consumers should match on the
+ * publicly-exported subclasses (NotFoundError, RateLimitError, etc.),
+ * not call this builder directly. Keryx 2026-05-23 review, finding #7.
+ */
 export function parseErrorResponse(res: Response, body: unknown): LinkgrepError {
   const ct = res.headers.get("content-type") ?? "";
   let code = "unknown";
@@ -371,6 +384,11 @@ export type Result<T, E = LinkgrepError> =
  * defeat the discrimination and TS would let consumers read other fields on a
  * duplicate result as silently `undefined`. See track/lead.ts:TrackLeadResult
  * and types.ts comments for the contract.
+ *
+ * @internal — used by track/lead.ts and track/sale.ts within the SDK; not
+ * re-exported by `packages/sdk/src/index.ts`. Consumers receive
+ * `TrackLeadResult` / `TrackSaleResult` already-translated and narrow via
+ * `"duplicate" in r`. Keryx 2026-05-23 review, finding #7.
  */
 export function mapConflict<T>(
   p: Promise<T>,
@@ -410,6 +428,11 @@ export function mapConflict<T>(
  *     safety beyond the documented schema."
  *
  * Hand-rolled (no Zod) to preserve the SDK's small install footprint.
+ *
+ * @internal — used by track/lead.ts and track/sale.ts at the JSON-parse
+ * seam; not re-exported by `packages/sdk/src/index.ts`. The guard runs
+ * before the `parsed as TrackXxxResponse` cast in each translator and is
+ * not meant to be called by consumers. Keryx 2026-05-23 review, finding #7.
  */
 export function assertResponseObject(parsed: unknown, endpoint: string): asserts parsed is Record<string, unknown> {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -432,6 +455,12 @@ export function assertResponseObject(parsed: unknown, endpoint: string): asserts
  * of the union. The defensive `.from()` fallback below catches any future code
  * path that throws an unwrapped error (e.g. a programming bug in mapConflict)
  * so the public Result contract still holds end-to-end.
+ *
+ * @internal — used by `track.lead.safe` / `track.sale.safe` within the SDK;
+ * not re-exported by `packages/sdk/src/index.ts`. Consumers get a
+ * `LeadTracker.safe()` / `SaleTracker.safe()` method that already returns
+ * a `Result<...>`; calling `toResult` directly is not part of the public
+ * surface. Keryx 2026-05-23 review, finding #7.
  */
 export async function toResult<T>(
   promise: Promise<T>,
