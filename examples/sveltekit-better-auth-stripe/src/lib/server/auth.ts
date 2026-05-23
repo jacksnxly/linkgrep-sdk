@@ -3,6 +3,7 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { linkgrepAnalytics } from "@linkgrep/better-auth";
 import { env } from "$env/dynamic/private";
 import { getLinkgrep } from "$lib/server/linkgrep";
+import { CLICK_COOKIE_NAME } from "$lib/server/click-cookie";
 
 // Twelve-Factor "Config" — secrets live in the environment, never in
 // source. The linkgrep client is built once via the shared composition
@@ -52,10 +53,13 @@ function build(): ReturnType<typeof betterAuth> {
     plugins: [
       linkgrepAnalytics({
         client: getLinkgrep(),
-        // `cookieName` intentionally omitted — the plugin defaults to
-        // `DEFAULT_CLICK_ID_COOKIE` from the SDK's `protocol.ts`. Passing
-        // it explicitly here would teach the unnecessary import and
-        // override the canonical default if the SDK ever changes it.
+        // Pass the cookie name explicitly from the shared composition
+        // module so this plugin config and the /lgr proxy filter
+        // (hooks.server.ts) stay in lockstep. Pre-fix (keryx 2026-05-23,
+        // finding #2), the proxy was hardcoded to the SDK default while
+        // this plugin accepted overrides — a `LINKGREP_CLICK_COOKIE`
+        // override would silently desync them.
+        cookieName: CLICK_COOKIE_NAME,
         eventName: "Sign Up",
       }),
     ],

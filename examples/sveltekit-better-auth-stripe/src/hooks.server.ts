@@ -1,5 +1,5 @@
 import type { Handle } from "@sveltejs/kit";
-import { DEFAULT_CLICK_ID_COOKIE } from "linkgrep";
+import { CLICK_COOKIE_NAME } from "$lib/server/click-cookie";
 
 // Headers that may be forwarded to linkgrep verbatim. Anything not in this
 // list is dropped to avoid leaking the host site's session cookies, auth
@@ -15,15 +15,20 @@ const FORWARDABLE_HEADERS = new Set([
 ]);
 
 /**
- * Pick only the lgr_id pair out of an incoming Cookie header. Keeps attribution
- * working without leaking better-auth session cookies or any other host-site
- * cookies to api.linkgrep.xyz.
+ * Pick only the click-ID cookie pair out of an incoming Cookie header.
+ * Keeps attribution working without leaking better-auth session cookies
+ * or any other host-site cookies to api.linkgrep.xyz.
+ *
+ * The cookie name comes from $lib/server/click-cookie so this filter
+ * and the better-auth plugin config stay in lockstep — overriding
+ * cookieName in one place without the other used to silently strip the
+ * renamed cookie at the proxy boundary (keryx 2026-05-23, finding #2).
  */
 function filterCookieHeader(raw: string | null): string | null {
   if (!raw) return null;
   const kept = raw
     .split(/;\s*/)
-    .filter(pair => pair.split("=")[0]?.trim() === DEFAULT_CLICK_ID_COOKIE);
+    .filter(pair => pair.split("=")[0]?.trim() === CLICK_COOKIE_NAME);
   return kept.length > 0 ? kept.join("; ") : null;
 }
 
