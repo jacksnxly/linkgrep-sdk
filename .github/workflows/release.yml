@@ -19,6 +19,17 @@ jobs:
       # npm CLI falls back to legacy token auth and `npm publish` fails.
       # https://docs.npmjs.com/trusted-publishers
       id-token: write
+      # Required so `gh workflow run publish-cdn.yml` (REST workflow_dispatch
+      # API: POST /repos/{owner}/{repo}/actions/workflows/{id}/dispatches)
+      # can succeed under GITHUB_TOKEN. Without this scope, the dispatch
+      # step below 403s once @linkgrep/analytics is in the release set,
+      # silently lurking behind the deferred Trusted-Publishing wiring.
+      # workflow_dispatch (and repository_dispatch) are explicit exceptions
+      # to the no-recursion rule for GITHUB_TOKEN-triggered events —
+      # https://docs.github.com/en/actions/concepts/security/github_token —
+      # so no fine-grained PAT or GitHub App token is needed here.
+      # Validated by keryx 2026-05-23 issue validation, finding #2.
+      actions: write
     steps:
       # SHA-pin every action on this OIDC-publishing workflow. Mutable major
       # tags (@v4, @v1) can be force-pushed by a compromised action repo,
