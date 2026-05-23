@@ -62,7 +62,16 @@ export class LinkgrepError extends Error {
     this.docUrl = init.docUrl;
     this.requestId = init.requestId;
     this.raw = init.raw;
-    this.headers = init.headers;
+    // Defensive copy of the response `Headers` (WHATWG Fetch:
+    // https://developer.mozilla.org/en-US/docs/Web/API/Headers/Headers —
+    // "the new Headers object copies its data from the existing Headers
+    // object"). Without this, the field would alias the caller's
+    // reference: mutating `err.headers.set(...)` would poison the SDK's
+    // internal state, and mutating the source Headers AFTER constructing
+    // the error would bleed into err.headers — a violation of the
+    // "errors are values" invariant the other readonly fields encode.
+    // Keryx 2026-05-23 review, finding #6.
+    this.headers = new Headers(init.headers);
   }
 }
 

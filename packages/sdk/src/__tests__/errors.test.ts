@@ -176,6 +176,37 @@ describe("error parsing", () => {
     }
   });
 
+  // Regression for keryx 2026-05-23 review, finding #6: pre-fix the
+  // `LinkgrepError` constructor stored the raw `Headers` reference, so
+  // (a) a consumer doing `err.headers.set(...)` mutated the SDK's internal
+  // state and (b) mutating the source `Headers` AFTER constructing the
+  // error also mutated `err.headers`. WHATWG Fetch (per MDN — see
+  // https://developer.mozilla.org/en-US/docs/Web/API/Headers/Headers)
+  // documents the constructor as: "the new Headers object copies its data
+  // from the existing Headers object." Defensive copy at the constructor
+  // boundary is the canonical seal.
+  it("LinkgrepError.headers is isolated from the source Headers (defensive copy)", () => {
+    const src = new Headers({ "x-request-id": "req_real_abc" });
+    const err = new LinkgrepError({
+      status: 500,
+      code: "internal_error",
+      message: "boom",
+      raw: null,
+      headers: src,
+    });
+    // Sanity: the error carries what the response had at construction time.
+    expect(err.headers.get("x-request-id")).toBe("req_real_abc");
+    // Identity: the error's Headers must NOT be the same reference.
+    expect(err.headers, "headers must not alias the source").not.toBe(src);
+    // Source-side isolation: mutating the source after construction must
+    // not bleed into the error.
+    src.set("x-request-id", "req_via_source_mutation");
+    expect(err.headers.get("x-request-id")).toBe("req_real_abc");
+    // Sink-side isolation: mutating err.headers must not bleed into source.
+    err.headers.set("x-request-id", "req_via_err_mutation");
+    expect(src.get("x-request-id")).toBe("req_via_source_mutation");
+  });
+
   it("exposes raw body and headers on every error", async () => {
     // The track/* layer translates 409 to { duplicate: true } via mapConflict
     // (see http/errors.ts), so we exercise the parser with a 400 + headers
