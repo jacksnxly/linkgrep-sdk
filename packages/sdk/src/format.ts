@@ -20,12 +20,28 @@ import { LinkgrepError, LinkgrepNetworkError } from "./http/errors.js";
  * and track.sale call sites.
  *
  * Output format for LinkgrepError:
- *   `[linkgrep] <prefix> failed: code=<code> status=<status> requestId=<id> docUrl=<url> message=<msg>`
+ *   `[linkgrep] <prefix> failed: code=<code> status=<status> requestId=<id> docUrl=<url> message="<msg>"`
  *
  * Output format for LinkgrepNetworkError:
- *   `[linkgrep] <prefix> transport failure: kind=<kind> message=<msg>`
+ *   `[linkgrep] <prefix> transport failure: kind=<kind> message="<msg>"`
  *
  * Missing optional fields (`requestId`, `docUrl`) render as `-`.
+ *
+ * The `message` value is JSON-encoded so embedded `;`, `=`, `"`, and
+ * newlines stay inside the quoted string. The other fields are
+ * SDK-controlled or alphabet-bounded (status is a number; code is a
+ * literal union; requestId/docUrl have URL-safe shapes) so they ship
+ * unquoted to keep the human-readable shape compact. Per Grafana Loki's
+ * logfmt parser docs (https://grafana.com/docs/loki/latest/query/log_queries/),
+ * `key="value in double quotes"` is the canonical valid form for any
+ * value containing whitespace or separators; an unquoted value
+ * containing `=` or extra `=` makes the whole pair invalid (`fo"o=bar`,
+ * `foo=bar=buzz`). Without this escape, a server-controlled message
+ * like `"missing field; eventName=fake"` parsed as a foreign top-level
+ * `eventName=fake` tag in Sentry / Datadog / Honeycomb / Loki scrapers,
+ * silently overriding the actual call's eventName.
+ *
+ * Keryx 2026-05-23 review, finding #3.
  *
  * @param prefix call-site identifier (e.g. "track.lead", "track.sale")
  * @param error  the SDK error to format
@@ -35,8 +51,8 @@ export function formatTrackError(
   error: LinkgrepError | LinkgrepNetworkError,
 ): string {
   if (error instanceof LinkgrepError) {
-    return `[linkgrep] ${prefix} failed: code=${error.code} status=${error.status} requestId=${error.requestId ?? "-"} docUrl=${error.docUrl ?? "-"} message=${error.message}`;
+    return `[linkgrep] ${prefix} failed: code=${error.code} status=${error.status} requestId=${error.requestId ?? "-"} docUrl=${error.docUrl ?? "-"} message=${JSON.stringify(error.message)}`;
   }
   // LinkgrepNetworkError branch (sealed union; no other arms exist).
-  return `[linkgrep] ${prefix} transport failure: kind=${error.kind} message=${error.message}`;
+  return `[linkgrep] ${prefix} transport failure: kind=${error.kind} message=${JSON.stringify(error.message)}`;
 }
