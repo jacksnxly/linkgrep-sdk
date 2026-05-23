@@ -15,6 +15,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { Linkgrep, LinkgrepNetworkError, RateLimitError } from "../index.js";
+// Import the internal-only retry options type via the non-barrel path —
+// this hook is deliberately NOT re-exported from `../index.js` (keryx
+// 2026-05-23, finding #2). Tests reaching for the observation seam opt
+// into the internal contract explicitly.
+import type { InternalRetryOptions } from "../http/retry.js";
 import { server } from "./msw-server.js";
 
 const BASE = "https://api.linkgrep.test";
@@ -93,16 +98,18 @@ describe("M-2: exponential backoff is clamped by maxBackoffMs", () => {
       }),
     );
     const sleeps: number[] = [];
+    const retry: InternalRetryOptions = {
+      maxAttempts: 6,
+      baseDelayMs: 100,
+      maxBackoffMs: 50, // very small cap — every sleep should land here
+      // Internal hook for test observation. NOT on the public RetryOptions
+      // surface (keryx 2026-05-23, finding #2).
+      onSleep: (ms) => { sleeps.push(ms); },
+    };
     const lg = new Linkgrep({
       token: "t",
       baseUrl: BASE,
-      retry: {
-        maxAttempts: 6,
-        baseDelayMs: 100,
-        maxBackoffMs: 50, // very small cap — every sleep should land here
-        // Internal hook for test observation (added in this fix batch).
-        onSleep: (ms) => { sleeps.push(ms); },
-      },
+      retry,
     });
     let threw: unknown;
     try {

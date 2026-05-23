@@ -110,53 +110,40 @@ describe("withRetry — Retry-After above cap (#I3b)", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  // Regression for keryx batch-2 #I11: at the cap boundary (retryAfter=60s),
-  // the strict `>` check lets the loop proceed, and `floorJitter` (up to 1000ms
-  // worst-case) could push the actual sleep to ~61_000ms — breaching the
-  // documented cap. The post-jitter sleep MUST be clamped to MAX_RETRY_AFTER_MS.
+  // Regression for keryx 2026-05-23 review, finding #5: at the equality
+  // boundary `retryAfter * 1000 == maxRetryAfterMs`, the pre-fix strict `>`
+  // check fell through to backoff calc, where `Math.min(... + jitter,
+  // maxRetryAfterMs)` truncated the jittered sleep to exactly the cap. All
+  // replicas resumed at the same instant — exactly the thundering-herd
+  // pattern the jitter exists to prevent (AWS Architecture Blog —
+  // "Exponential Backoff And Jitter").
   //
-  // C11 refactor: replaced setTimeout-spy with behavioral fake-timer
-  // advancement. Vitest canonical pattern (https://vitest.dev/api/vi.html):
-  // advance time and observe call counts.
-  it("clamps post-jitter sleep to MAX_RETRY_AFTER_MS at the cap boundary", async () => {
-    vi.useFakeTimers();
-    try {
-      // Force the worst-case jitter path: floorJitter approaches 1000ms.
-      vi.spyOn(Math, "random").mockReturnValue(0.9999);
-
-      let i = 0;
-      const fn = vi.fn(async () => {
-        i++;
-        if (i === 1) {
-          throw new RateLimitError({
-            status: 429,
-            code: "rate_limited",
-            message: "exactly at cap",
-            raw: null,
-            headers: new Headers(),
-            retryAfter: 60, // exactly the cap
-          });
-        }
-        return "ok";
+  // Fix: use `>=` so the boundary throws to the caller. The caller already
+  // has `err.retryAfter` available and can schedule its own retry with
+  // application-level jitter — matching the documented behavior for `>`.
+  it("throws RateLimitError when retryAfter equals MAX_RETRY_AFTER_MS (refuses to wedge)", async () => {
+    const fn = vi.fn(async () => {
+      throw new RateLimitError({
+        status: 429,
+        code: "rate_limited",
+        message: "exactly at cap",
+        raw: null,
+        headers: new Headers(),
+        retryAfter: 60, // exactly the default cap (60_000 ms)
       });
+    });
 
-      const p = withRetry(fn, 3);
-      await vi.advanceTimersByTimeAsync(0); // let first attempt settle
-      expect(fn).toHaveBeenCalledTimes(1);
-
-      // Advance to exactly the documented cap. If post-jitter sleep weren't
-      // clamped, the second attempt would still be pending at this point
-      // (sleep would have been ~60_999ms with worst-case jitter). With the
-      // clamp, the sleep is exactly 60_000ms and the second attempt fires
-      // within this advancement.
-      await vi.advanceTimersByTimeAsync(60_000);
-      await p;
-
-      expect(fn).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-      vi.restoreAllMocks();
+    let caught: unknown;
+    try {
+      await withRetry(fn, 3);
+    } catch (e) {
+      caught = e;
     }
+    expect(caught).toBeInstanceOf(RateLimitError);
+    expect((caught as RateLimitError).retryAfter).toBe(60);
+    // No retry attempted — surface immediately so the caller can apply
+    // application-level scheduling instead of the SDK silently wedging.
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 

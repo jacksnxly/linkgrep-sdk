@@ -217,4 +217,100 @@ describe("withRetry", () => {
     expect(caught).toBeInstanceOf(LinkgrepError);
     expect(attempts).toBe(1);
   });
+
+  // Regression for keryx 2026-05-23 review finding #4: WHATWG DOM specifies
+  // that `addEventListener("abort", ...)` does NOT fire for a signal that
+  // is already aborted at registration time. Pre-fix, if the caller signal
+  // aborted during attempt N's catch block (between the throw and the
+  // Promise executor that schedules the sleep), the listener attached to
+  // an already-aborted signal and never fired. The sleep ran to full
+  // duration before the next attempt's pre-flight check picked up the abort.
+  //
+  // Canonical fix mirrors retry.ts:75-77 — check-then-listen pattern
+  // documented at MDN AbortSignal: call signal.throwIfAborted() (or
+  // equivalent) BEFORE addEventListener.
+  it("aborts the backoff sleep when caller signal aborts inside the catch block", async () => {
+    const ac = new AbortController();
+    const recordedSleeps: number[] = [];
+    let attempts = 0;
+
+    const fn = async () => {
+      attempts++;
+      if (attempts === 1) {
+        // Schedule the abort synchronously — by the time the sleep
+        // executor runs, ac.signal is already aborted.
+        queueMicrotask(() => ac.abort(new Error("caller-aborted-mid-flight")));
+        throw new LinkgrepError({
+          status: 500,
+          code: "internal_error",
+          message: "boom",
+          raw: null,
+          headers: new Headers(),
+        });
+      }
+      return "unreachable";
+    };
+
+    const start = Date.now();
+    let caught: unknown;
+    try {
+      await withRetry(fn, {
+        maxAttempts: 3,
+        baseDelayMs: 500,
+        maxBackoffMs: 1000,
+        // Test observation seam — accepted by InternalRetryOptions only.
+        onSleep: (ms) => recordedSleeps.push(ms),
+      }, ac.signal);
+    } catch (e) {
+      caught = e;
+    }
+    const elapsed = Date.now() - start;
+
+    // The sleep was scheduled (we observed it) but the abort should have
+    // cut it short well before the full 500ms+jitter elapsed.
+    expect(recordedSleeps.length).toBe(1);
+    expect(caught).toBeDefined();
+    // Allow generous slack for CI jitter; pre-fix this was ~500ms+,
+    // post-fix it should be <100ms because the abort fires before the
+    // setTimeout completes.
+    expect(elapsed, `elapsed=${elapsed}ms — abort should have cut sleep short`).toBeLessThan(200);
+  });
+
+  // Regression for keryx 2026-05-23 review finding #5: at the equality
+  // boundary `err.retryAfter * 1000 == maxRetryAfterMs`, the pre-fix `>`
+  // check fell through to backoff calculation, and the
+  // `Math.min(retryAfterMs + jitter, maxRetryAfterMs)` clamp at retry.ts:152
+  // truncated the jittered sleep to exactly `maxRetryAfterMs`. All replicas
+  // resumed at the same instant — exactly the thundering-herd pattern the
+  // jitter exists to prevent (AWS Architecture Blog).
+  //
+  // Fix: use `>=` so the boundary throws to the caller (who already has
+  // err.retryAfter available and can schedule its own retry).
+  it("throws when server Retry-After equals maxRetryAfterMs (boundary, refuses to wedge)", async () => {
+    let attempts = 0;
+    const fn = vi.fn(async () => {
+      attempts++;
+      throw new RateLimitError({
+        status: 429,
+        code: "rate_limited",
+        message: "Slow down",
+        raw: null,
+        headers: new Headers({ "retry-after": "60" }),
+        retryAfter: 60, // exactly default maxRetryAfterMs (60_000 ms)
+      });
+    });
+
+    let caught: unknown;
+    try {
+      await withRetry(fn, { maxAttempts: 3, maxRetryAfterMs: 60_000 });
+    } catch (e) {
+      caught = e;
+    }
+    // Boundary case: refuse to wedge at the cap — surface the
+    // RateLimitError to the caller immediately (matches the
+    // documented behavior for `>` cases).
+    expect(caught).toBeInstanceOf(RateLimitError);
+    expect((caught as RateLimitError).retryAfter).toBe(60);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
 });

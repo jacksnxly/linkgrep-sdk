@@ -104,3 +104,28 @@ describe("I-14: SDK derives `mode` default from clickId presence", () => {
     expect(receivedMode).toBe("wait");
   });
 });
+
+// Regression for keryx 2026-05-23 review, finding #2: the `onSleep` test
+// observation seam is NOT part of the documented public API. Pre-fix it
+// lived on `RetryOptions` with a `@internal` JSDoc tag, but tsc does not
+// strip `@internal` — consumers saw it in IDE autocomplete and could
+// build production code against it. Splitting `InternalRetryOptions` off
+// (with `onSleep`) and keeping `RetryOptions` clean fixes the leak.
+describe("#2 onSleep is not on the public RetryOptions surface", () => {
+  it("RetryOptions does not accept onSleep (type-level regression)", () => {
+    // This block is checked at compile time. If a future refactor puts
+    // onSleep back on RetryOptions, the `@ts-expect-error` directive
+    // becomes unused and tsc reports it — failing typecheck (and CI).
+    //
+    // The test body itself is a no-op runtime assertion; the real check
+    // is the tsc directive above.
+    type _RetryOptions = import("../index.js").RetryOptions;
+    const opts: _RetryOptions = {
+      maxAttempts: 1,
+      // @ts-expect-error — onSleep must NOT be assignable on the public type
+      onSleep: () => {},
+    };
+    void opts;
+    expect(true).toBe(true);
+  });
+});

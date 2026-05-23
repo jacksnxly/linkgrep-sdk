@@ -44,13 +44,29 @@ export interface RetryOptions {
    * vs `call_timeout`.
    */
   totalBudgetMs?: number;
+}
+
+/**
+ * Internal-only extension of RetryOptions. NOT re-exported from the public
+ * package barrel (`packages/sdk/src/index.ts`) — only reachable via the
+ * non-barrel path `linkgrep/dist/http/retry.js`. Tests inside this package
+ * import withRetry directly from `../http/retry.js` and so see this type.
+ *
+ * `@internal` JSDoc tag is honored by `@microsoft/api-extractor` (the
+ * canonical TypeScript tool for stripping internals from public .d.ts
+ * rollups). `tsc` itself does NOT strip @internal — the not-re-exporting
+ * is what keeps consumers from reaching this hook.
+ *
+ * Adding fields here that should NEVER be on the public surface is the
+ * intended use; promoting to RetryOptions is the explicit opt-in for any
+ * future public knob.
+ */
+export interface InternalRetryOptions extends RetryOptions {
   /**
-   * Internal hook used by regression tests to observe each computed sleep
-   * without actually advancing wall time. Not part of the documented public
-   * surface. Fires after the backoff is clamped and any budget gate would
-   * have allowed the sleep — i.e. with the same value the runtime will
-   * pass to setTimeout.
-   * @internal
+   * Test observation seam — fires with each computed sleep value before
+   * setTimeout runs. Used by regression tests to assert backoff math
+   * (Retry-After clamping, jitter spread, budget gating) without advancing
+   * wall time.
    */
   onSleep?: (ms: number) => void;
 }
@@ -64,7 +80,7 @@ const DEFAULT_RETRY: Required<Omit<RetryOptions, "totalBudgetMs" | "onSleep">> =
 
 export async function withRetry<T>(
   fn: (perAttemptSignal?: AbortSignal) => Promise<T>,
-  options: RetryOptions | number = DEFAULT_RETRY,
+  options: InternalRetryOptions | number = DEFAULT_RETRY,
   callerSignal?: AbortSignal,
 ): Promise<T> {
   // Pre-flight on caller signal: WHATWG DOM specifies that
@@ -108,12 +124,22 @@ export async function withRetry<T>(
       if (err instanceof LinkgrepError && !RETRYABLE_STATUS.has(err.status)) {
         throw err;
       }
-      // Honor server's Retry-After on 429 (RFC 9110 §10.2.3). If it exceeds
-      // our cap, surface the RateLimitError to the caller instead of silently
-      // truncating — the caller has err.retryAfter and can schedule its own
-      // retry. Refusing to wedge here protects the SDK budget without lying
-      // to the application about how long the server actually asked for.
-      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 > maxRetryAfterMs) {
+      // Honor server's Retry-After on 429 (RFC 9110 §10.2.3). If it meets
+      // or exceeds our cap, surface the RateLimitError to the caller
+      // instead of silently truncating — the caller has err.retryAfter and
+      // can schedule its own retry. Refusing to wedge here protects the
+      // SDK budget without lying to the application about how long the
+      // server actually asked for.
+      //
+      // The boundary case (`retryAfter * 1000 == maxRetryAfterMs`) used to
+      // fall through to backoff calc, where `Math.min(... + jitter,
+      // maxRetryAfterMs)` truncated the jittered sleep to exactly the cap
+      // — all replicas resumed at the same instant, exactly the
+      // thundering-herd pattern the jitter exists to prevent (AWS
+      // Architecture Blog — "Exponential Backoff And Jitter"). Using `>=`
+      // closes that boundary by throwing to the caller (keryx 2026-05-23,
+      // finding #5).
+      if (err instanceof RateLimitError && err.retryAfter !== undefined && err.retryAfter * 1000 >= maxRetryAfterMs) {
         throw err;
       }
       lastError = err;
@@ -172,7 +198,26 @@ export async function withRetry<T>(
         // request cancellation). We race the sleep against the signal's
         // abort. The setTimeout is cleared on abort to avoid keeping the
         // event loop alive.
+        //
+        // Canonical check-then-listen pattern (MDN, Web/API/AbortSignal):
+        // addEventListener("abort", ...) does NOT fire for an
+        // already-aborted signal, so we must explicitly check `aborted`
+        // before registering the listener. Pre-fix (keryx 2026-05-23,
+        // finding #4), an abort that fired during attempt N's catch block
+        // (after the throw, before this executor ran) attached to an
+        // already-aborted signal and never fired — the sleep ran to full
+        // duration.
         await new Promise<void>((resolve, reject) => {
+          if (callerSignal?.aborted) {
+            reject(
+              new LinkgrepNetworkError(
+                "abort",
+                "caller AbortSignal was already aborted before retry backoff sleep",
+                callerSignal.reason,
+              ),
+            );
+            return;
+          }
           const timerId = setTimeout(() => {
             callerSignal?.removeEventListener("abort", onAbort);
             resolve();
