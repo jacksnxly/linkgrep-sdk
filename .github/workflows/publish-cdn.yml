@@ -67,10 +67,25 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @linkgrep/analytics build
 
+      # SECURITY: route `inputs.version` through an intermediate environment
+      # variable so the runner shell — not the GitHub Actions templating
+      # engine — dereferences it. Interpolating `${{ inputs.version }}`
+      # directly into a `run:` script lets a malicious dispatcher break out
+      # of the surrounding quotes BEFORE the regex gate on line 82 ever runs
+      # (verified end-to-end via keryx 2026-05-23: payload
+      # `0.0.0"; echo PWNED; exit 0; #` reached exit 0 with the regex
+      # unreached). With `env:` indirection the value is just a bash
+      # variable; double-quoting inside `[[ ... ]]` defangs metacharacters.
+      # Per docs.github.com/en/actions/security-for-github-actions/security-guides/
+      # security-hardening-for-github-actions#using-an-intermediate-environment-variable
+      # ("the value of the expression is stored in memory and used as a
+      # variable, and doesn't interact with the script generation process").
       - name: Validate inputs and artifact
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ inputs.version }}"
+          VERSION="$INPUT_VERSION"
           # Strict semver MAJOR.MINOR.PATCH (no pre-release / build suffix —
           # CDN serves stable only; pre-releases stay on npm + jsDelivr).
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
