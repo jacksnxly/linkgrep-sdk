@@ -199,27 +199,33 @@ test.describe("linkgrep attribution flow", () => {
   //
   // File-truth structural check (the actual end-to-end timing path
   // requires STRIPE_WEBHOOK_SECRET + a forged signature + a slow MSW
-  // fixture; not available in the public OSS example). If the example
-  // ever regresses to `await ...track.sale.safe`, this assertion fires.
-  test("stripe-webhook handler dispatches track.sale WITHOUT awaiting it (#issue-1)", async () => {
+  // fixture; not available in the public OSS example).
+  //
+  // Only the NEGATIVE assertion (a literal `await track.sale.safe`)
+  // remains — that one matches the actual regression to catch. The prior
+  // positive assertion `/\bvoid\s+getLinkgrep\(\)/` was structurally
+  // brittle: two non-bug refactors (extract to local var; rely on `.catch`
+  // instead of `void`) failed the assertion despite identical
+  // fire-and-forget semantics. Keeping only the negative assertion lets
+  // genuine code-cleanliness refactors land without spurious CI fails
+  // while still locking the only behavior that matters.
+  // Keryx 2026-05-23 review, finding #4.
+  test("stripe-webhook handler does NOT await track.sale.safe (#issue-1)", async () => {
     const fs = await import("node:fs/promises");
     const url = await import("node:url");
     const { fileURLToPath } = url;
     const here = fileURLToPath(new URL(".", import.meta.url));
     const filePath = `${here}../src/routes/api/stripe-webhook/+server.ts`;
     const src = await fs.readFile(filePath, "utf8");
-    // The await pattern under test:
-    //   const r = await getLinkgrep().track.sale.safe({ ... });
-    // Pattern-matches any of `await getLinkgrep().track.sale` or
-    // `await ...track.sale.safe` in the handler body — robust against
-    // formatting (line breaks, intermediate vars).
+    // The offending pattern: any `await ...track.sale.safe(...)` form.
+    // Robust against intermediate variables and line breaks (the `[^;]*`
+    // arm tolerates `getLinkgrep().` / `linkgrep.` / `client.` prefixes
+    // and chained accessors as long as they sit in the same statement).
     const offendingPattern = /\bawait\s+[^;]*track\.sale\.safe\s*\(/;
     expect(
       offendingPattern.test(src),
       "stripe-webhook handler must not await track.sale.safe — dispatch must be fire-and-forget so the 200 ack stays inside Stripe's delivery window. See https://docs.stripe.com/webhooks.",
     ).toBe(false);
-    // Belt-and-braces: confirm the fire-and-forget shape IS present.
-    expect(src, "the handler must invoke track.sale.safe via the void/.then dispatch pattern").toMatch(/\bvoid\s+getLinkgrep\(\)/);
   });
 
   test("pricing page POSTs to /create-checkout WITHOUT lgCustomerExternalId in the body", async ({ page }) => {
