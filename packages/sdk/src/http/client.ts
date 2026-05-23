@@ -42,6 +42,15 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 // error paths in post() below.
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
 
+// Module-level decoder. TextDecoder is stateless across decode() calls when
+// `stream: false` (the default) — every call is treated as a complete decode
+// and the decoder state resets. Reusing a single instance across requests
+// avoids the per-response ICU-backed constructor allocation, which is
+// non-trivial in V8 under sustained throughput. (Node `util.TextDecoder`
+// docs: "Each call is treated as a complete decode operation ... The decoder
+// can be reused for subsequent calls." MDN TextDecoder — same semantics.)
+const RESPONSE_DECODER = new TextDecoder();
+
 /**
  * Stream-read a Response body into JSON with a hard byte cap. Rejects with
  * LinkgrepNetworkError before allocating beyond `capBytes`. AbortError /
@@ -95,7 +104,7 @@ export async function readJsonWithByteCap(res: Response, capBytes: number): Prom
     buf.set(c, offset);
     offset += c.length;
   }
-  const text = new TextDecoder().decode(buf);
+  const text = RESPONSE_DECODER.decode(buf);
   if (text.length === 0) return null;
   try {
     return JSON.parse(text);
