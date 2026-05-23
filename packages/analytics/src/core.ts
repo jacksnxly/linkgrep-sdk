@@ -40,5 +40,12 @@ export function init(opts: LinkgrepBrowserAnalyticsOptions = {}): void {
 export function getClickId(cookieName: string = DEFAULT_CLICK_ID_COOKIE): string | undefined {
   if (typeof document === "undefined") return undefined;
   const value = getCookieValue(cookieName);
-  return value ? value : undefined;
+  // Symmetric trust boundary with `init()` above: the cookie store is a
+  // shared writable surface (XSS, browser extensions, DevTools, third-party
+  // scripts can all `document.cookie = "lgr_id=<arbitrary>"`). Re-validate
+  // on read to keep the click-ID guarantees the writer enforces — bounded
+  // length, URL-safe alphabet, no `;` / `=` / control bytes that could be
+  // smuggled downstream into HTTP headers or URL params. OWASP Session
+  // Management Cheat Sheet: "Manage Session ID as Any Other User Input."
+  return value && CLICK_ID_PATTERN.test(value) ? value : undefined;
 }

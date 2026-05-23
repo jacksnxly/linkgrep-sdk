@@ -114,3 +114,76 @@ describe("init()", () => {
     }
   });
 });
+
+// Asymmetric-trust regression (keryx 2026-05-23 review, finding #3).
+// `init()` validates ?lg_id= against CLICK_ID_PATTERN before writing the
+// cookie, but pre-fix `getClickId()` returned whatever was in
+// `document.cookie` without revalidating. document.cookie is a shared
+// writable surface (XSS payload, browser extension, DevTools, third-party
+// script can all write it) — the SDK must treat it as untrusted input on
+// read, matching how it treats ?lg_id= on write.
+//
+// OWASP Session Management Cheat Sheet: "Manage Session ID as Any Other
+// User Input" — session/attribution identifiers are validated and verified.
+describe("getClickId() defense-in-depth validation", () => {
+  beforeEach(() => {
+    document.cookie.split(";").forEach(c => {
+      document.cookie = c.trim().split("=")[0] + "=;Max-Age=0;Path=/";
+    });
+  });
+
+  it("rejects a cookie value with characters outside CLICK_ID_PATTERN", () => {
+    // Simulate an XSS / extension / DevTools write that bypassed init().
+    document.cookie = "lgr_id=foo;Path=/";
+    // Manually inject a value containing `;` via the cookie getter override
+    // (browsers normalize on write, so we override the getter).
+    let proto: object | null = Object.getPrototypeOf(document);
+    let original: PropertyDescriptor | undefined;
+    while (proto && !original) {
+      original = Object.getOwnPropertyDescriptor(proto, "cookie");
+      if (!original) proto = Object.getPrototypeOf(proto);
+    }
+    if (!original) throw new Error("cookie descriptor not found");
+    Object.defineProperty(document, "cookie", {
+      get() { return "lgr_id=foo bar"; }, // space is illegal per CLICK_ID_PATTERN
+      set() {},
+      configurable: true,
+    });
+    try {
+      expect(getClickId()).toBeUndefined();
+    } finally {
+      Object.defineProperty(document, "cookie", original);
+    }
+  });
+
+  it("rejects a cookie value that exceeds the 200-char length cap", () => {
+    const tooLong = "a".repeat(300);
+    document.cookie = `lgr_id=${tooLong};Path=/`;
+    expect(getClickId()).toBeUndefined();
+  });
+
+  it("rejects a cookie value containing control bytes", () => {
+    let proto: object | null = Object.getPrototypeOf(document);
+    let original: PropertyDescriptor | undefined;
+    while (proto && !original) {
+      original = Object.getOwnPropertyDescriptor(proto, "cookie");
+      if (!original) proto = Object.getPrototypeOf(proto);
+    }
+    if (!original) throw new Error("cookie descriptor not found");
+    Object.defineProperty(document, "cookie", {
+      get() { return "lgr_id=foo\x01bar"; },
+      set() {},
+      configurable: true,
+    });
+    try {
+      expect(getClickId()).toBeUndefined();
+    } finally {
+      Object.defineProperty(document, "cookie", original);
+    }
+  });
+
+  it("returns a value that passes CLICK_ID_PATTERN unchanged", () => {
+    document.cookie = "lgr_id=valid_click-ID_123;Path=/";
+    expect(getClickId()).toBe("valid_click-ID_123");
+  });
+});
