@@ -24,7 +24,7 @@ describe("formatTrackError — single-source structured-log shape", () => {
       headers: new Headers(),
     });
     expect(formatTrackError("track.sale", err)).toBe(
-      "[linkgrep] track.sale failed: code=unprocessable status=422 requestId=req_abc123 docUrl=https://docs.linkgrep.xyz/errors/unprocessable message=\"amount must be > 0\"",
+      "[linkgrep] track.sale failed: code=unprocessable status=422 requestId=\"req_abc123\" docUrl=\"https://docs.linkgrep.xyz/errors/unprocessable\" message=\"amount must be > 0\"",
     );
   });
 
@@ -141,9 +141,16 @@ describe("formatTrackError — single-source structured-log shape", () => {
       const line = formatTrackError("track.lead", err);
       // Single-line guarantee must survive a hostile docUrl too.
       expect((line.match(/\n/g) || []).length, "single-line").toBe(0);
-      // Exactly one `message=` token — the injected `message=stolen`
-      // payload must not surface as a foreign top-level tag.
-      expect((line.match(/message=/g) || []).length, "exactly one message=").toBe(1);
+      // Exactly one TOP-LEVEL `message=` token. The regex matches
+      // `message="` only at logfmt token boundaries (start-of-line or
+      // preceded by whitespace) — substring occurrences inside
+      // already-quoted values (e.g. the JSON-encoded docUrl carrying a
+      // literal `message=stolen` payload) are correctly excluded, the
+      // same way Loki's logfmt parser walks tokens with quote-awareness.
+      expect(
+        (line.match(/(?:^|\s)message="/g) || []).length,
+        "exactly one top-level message= token",
+      ).toBe(1);
       // Round-trip: docUrl is a JSON string carrying the verbatim original.
       const docUrlValue = line.match(/docUrl=("(?:[^"\\]|\\.)*")/)?.[1];
       expect(docUrlValue, "docUrl is JSON-quoted").toBeDefined();
