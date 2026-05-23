@@ -50,6 +50,27 @@ concurrency: cdn-publish-${{ inputs.version }}
 env:
   R2_BUCKET: linkgrep-cdn
 
+# Least-privilege scope for GITHUB_TOKEN. This workflow consumes
+# R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_ENDPOINT via secrets, but
+# does NOT write to the repo — no commits, no PR comments, no release
+# creation. Per GitHub security hardening docs (verified verbatim via
+# WebFetch 2026-05-23 against
+# docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions):
+#   "It's good security practice to set the default permission for the
+#    GITHUB_TOKEN to read access only for repository contents. The
+#    permissions can then be increased, as required, for individual
+#    jobs within the workflow file."
+#   "You should therefore make sure that the GITHUB_TOKEN is granted
+#    the minimum required permissions."
+# The repo-level default is already `read` (queried 2026-05-23 via
+#   gh api repos/jacksnxly/linkgrep-sdk/actions/permissions/workflow
+# → "default_workflow_permissions":"read") so this declaration is
+# defense-in-depth — it survives a future repo-level default flip and
+# makes the workflow's intent auditable inline.
+# Validated by keryx 2026-05-23 issue validation, finding #3.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
