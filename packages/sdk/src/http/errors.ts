@@ -382,13 +382,32 @@ export function mapConflict<T>(
 }
 
 /**
- * Lightweight runtime guard at the JSON-parse seam (keryx I-12). The SDK's
- * track responses (`TrackLeadResponse`, `TrackSaleResponse`) are all-optional
- * shapes, so the only structural drift this guard catches is "server returned
- * something that is not a plain JSON object" — array, primitive, etc. That's
- * sufficient to turn the previous unsound `parsed as T` cast in `HttpClient.post`
- * into a tagged transport failure, without imposing a per-field schema that
- * would break on legitimate server-side optional-field changes.
+ * Lightweight runtime guard at the JSON-parse seam (keryx I-12). Narrows
+ * `parsed: unknown` to `Record<string, unknown>` by rejecting array,
+ * primitive, and null shapes — the SDK's track responses
+ * (`TrackLeadResponse`, `TrackSaleResponse`) are documented as JSON
+ * objects, so a non-object body is by definition a transport-layer
+ * defect (upstream misconfiguration, MITM rewrite, edge-cache poisoning).
+ *
+ * What this guard catches:
+ *   - Server returned a JSON array (`[...]`)
+ *   - Server returned a JSON primitive (string / number / boolean / null)
+ *   - Top-level shape mismatch with the documented envelope contract
+ *
+ * What this guard deliberately DOES NOT catch:
+ *   - Wrong field types within a valid object (e.g. server returns
+ *     `{ customerId: 12345 }` where the type declares `customerId: string`).
+ *     The follow-on `parsed as TrackLeadResponse` / `parsed as TrackSaleResponse`
+ *     cast in track/lead.ts and track/sale.ts is structurally unsound for
+ *     this case — but the response types are all-optional and hand-maintained
+ *     against the server schema (see types.ts:1-11 for the authoritative
+ *     source). Per-field validation would require shipping a schema runtime
+ *     (Zod, Valibot, custom validator) and would invalidate the manual-sync
+ *     contract that lets consumers receive new server fields without an SDK
+ *     bump. Consumers writing `response.customerId.toLowerCase()` on an
+ *     unexpectedly-typed field will see a runtime TypeError; the SDK's
+ *     guarantee is "transport-layer correctness," not "field-level type
+ *     safety beyond the documented schema."
  *
  * Hand-rolled (no Zod) to preserve the SDK's small install footprint.
  */
