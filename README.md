@@ -118,14 +118,16 @@ export const auth = betterAuth({
   plugins: [
     linkgrepAnalytics({
       client: linkgrep,
-      // Defaults: ["/sign-up/email", "/callback/", "/sign-in/magic-link"]
-      // — fires on first-session-creating endpoints, not on returning sign-ins.
+      // Fires from `databaseHooks.user.create.after` — once per new user,
+      // for every signup surface (email/password, OAuth, magic link),
+      // even when `requireEmailVerification` means no session exists yet.
+      // Never fires on returning-user sign-in.
     }),
   ],
 });
 ```
 
-The plugin reads the `lgr_id` click cookie from the request, fires `track.lead.safe` in the background, and never blocks the auth response. Failed dispatches surface through an optional `onError(error)` hook so you can route them to Sentry / Datadog / Honeycomb.
+The plugin reads the `lgr_id` click cookie from the signup request (no cookie → no referral → nothing is sent), fires `track.lead.safe` in the background, and never blocks the auth response. Failed dispatches surface through an optional `onError(error)` hook so you can route them to Sentry / Datadog / Honeycomb.
 
 ## React hook
 
