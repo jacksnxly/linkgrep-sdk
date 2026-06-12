@@ -160,10 +160,9 @@ describe("linkgrepAnalytics plugin", () => {
       headers: new Headers({ cookie: "lgr_id=click_fence" }),
     });
     await vi.waitFor(() => expect(trackHandlerSpy).toHaveBeenCalledTimes(1));
-    expect(
-      capturedBody.clickId,
-      "the only dispatch must be the cookie-carrying fence signup",
-    ).toBe("click_fence");
+    expect(capturedBody.clickId, "the only dispatch must be the cookie-carrying fence signup").toBe(
+      "click_fence",
+    );
   });
 
   it("does not call track.lead on sign-in (existing user)", async () => {
